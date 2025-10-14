@@ -25,7 +25,8 @@ module Sashite
         time_limit
         move_limit
         repetition
-        mutual_agreement
+        agreement
+        insufficient
       ].freeze
 
       # @return [Feen::Position] Initial position

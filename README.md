@@ -295,7 +295,8 @@ result = original
 - `"time_limit"` - Time exceeded
 - `"move_limit"` - Move limit reached
 - `"repetition"` - Position repetition
-- `"mutual_agreement"` - Players agreed to end
+- `"agreement"` - Players agreed to end
+- `"insufficient"` - Neither player has sufficient material to force a win
 
 ## API Reference
 

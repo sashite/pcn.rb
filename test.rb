@@ -604,7 +604,7 @@ run_test("Valid status values accepted") do
   valid_statuses = %w[
     in_progress checkmate stalemate bare_king mare_king
     resignation illegal_move time_limit move_limit
-    repetition mutual_agreement
+    repetition agreement insufficient
   ]
 
   valid_statuses.each do |status|
