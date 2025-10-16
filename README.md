@@ -9,473 +9,346 @@
 
 ## What is PCN?
 
-PCN (Portable Chess Notation) is a comprehensive, JSON-based format for representing complete chess game records across variants. PCN integrates the Sashité ecosystem specifications (PMN, FEEN, and SNN) to create a unified, rule-agnostic game recording system that supports both traditional single-variant games and cross-variant scenarios.
+PCN (Portable Chess Notation) is a comprehensive, JSON-based format for representing complete chess game records across variants. PCN provides unified, rule-agnostic game recording supporting both traditional single-variant games and cross-variant scenarios with complete metadata tracking.
 
-This gem implements the [PCN Specification v1.0.0](https://sashite.dev/specs/pcn/1.0.0/) as a pure functional library with immutable data structures, providing a clean Ruby interface for parsing, validating, and generating PCN game records.
+This gem implements the [PCN Specification v1.0.0](https://sashite.dev/specs/pcn/1.0.0/).
 
 ## Installation
-
 ```ruby
 # In your Gemfile
 gem "sashite-pcn"
 ```
 
 Or install manually:
-
 ```sh
 gem install sashite-pcn
 ```
 
 ## Dependencies
 
-PCN builds upon three foundational Sashité specifications:
-
+PCN builds upon the Sashité ecosystem specifications:
 ```ruby
 gem "sashite-pmn"   # Portable Move Notation
 gem "sashite-feen"  # Forsyth-Edwards Enhanced Notation
 gem "sashite-snn"   # Style Name Notation
+gem "sashite-cgsn"  # Chess Game Status Notation
 ```
-
-## Quick Start
-
-```ruby
-require "sashite/pcn"
-
-# Parse a PCN hash
-game = Sashite::Pcn.parse({
-  "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
-  "moves" => [
-    ["e2", "e4", "C:P"],
-    ["e7", "e5", "c:p"]
-  ],
-  "status" => "in_progress"
-})
-
-# Access game components
-game.setup                    # => #<Sashite::Feen::Position ...>
-game.moves                    # => [#<Sashite::Pmn::Move ...>, ...]
-game.status                   # => "in_progress"
-game.valid?                   # => true
-
-# Convert back to hash
-game.to_h                     # => { "setup" => "...", "moves" => [...], ... }
-```
-
-## JSON Integration
-
-This gem focuses on the core PCN data structures and does not include JSON parsing/dumping. Use your preferred JSON library:
-
-```ruby
-require "json"
-require "sashite/pcn"
-
-# Load from JSON file
-json_string = File.read("game.json")
-pcn_hash = JSON.parse(json_string)
-game = Sashite::Pcn.parse(pcn_hash)
-
-# Save to JSON file
-File.write("game.json", JSON.pretty_generate(game.to_h))
-
-# Or with Oj for better performance
-require "oj"
-game = Sashite::Pcn.parse(Oj.load_file("game.json"))
-Oj.to_file("game.json", game.to_h)
-```
-
-## PCN Format
-
-A PCN document is a hash with five fields:
-
-```ruby
-{
-  "meta" => {                               # Optional metadata
-    "name" => String,
-    "event" => String,
-    "location" => String,
-    "round" => Integer,
-    "started_on" => "YYYY-MM-DD",
-    "finished_at" => "YYYY-MM-DDTHH:MM:SSZ",
-    "href" => String
-  },
-  "sides" => {                              # Optional player information
-    "first" => {
-      "style" => String,                    # SNN format
-      "name" => String,
-      "elo" => Integer
-    },
-    "second" => {
-      "style" => String,
-      "name" => String,
-      "elo" => Integer
-    }
-  },
-  "setup" => String,                        # Required: FEEN position
-  "moves" => Array,                         # Required: PMN arrays
-  "status" => String                        # Optional: game status
-}
-```
-
-Only `setup` and `moves` are required. See the [PCN Specification](https://sashite.dev/specs/pcn/1.0.0/) for complete format details.
 
 ## Usage
 
-### Parsing Game Records
-
+### Parsing and Validation
 ```ruby
-# From hash
-game_hash = {
-  "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
-  "moves" => [["e2", "e4", "C:P"]],
-  "status" => "in_progress"
-}
-game = Sashite::Pcn.parse(game_hash)
+require "sashite/pcn"
 
-# Validation without exception
-Sashite::Pcn.valid?(game_hash)              # => true
-Sashite::Pcn.valid?({ "setup" => "" })      # => false
+# Parse a minimal PCN document (only setup required)
+game = Sashite::Pcn.parse({
+  "setup" => "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
+})
+
+game.setup         # => "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
+game.meta          # => {} (defaults to empty hash when omitted)
+game.sides         # => {} (defaults to empty hash when omitted)
+game.moves         # => [] (defaults to empty array when omitted)
+game.status        # => nil (defaults to nil when omitted)
+
+# Parse with explicit moves
+game = Sashite::Pcn.parse({
+  "setup" => "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
+  "moves" => [
+    ["e2", "e4"],
+    ["e7", "e5"]
+  ]
+})
+
+game.moves.length  # => 2
+
+# Validate without parsing
+Sashite::Pcn.valid?({
+  "setup" => "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
+})  # => true (all fields except setup are optional)
 ```
 
-### Creating Game Records
-
+### Creating Games
 ```ruby
-# Create a new game from components
-game = Sashite::Pcn.new(
-  setup: Sashite::Feen.parse("+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"),
-  moves: [
-    Sashite::Pmn.parse(["e2", "e4", "C:P"]),
-    Sashite::Pmn.parse(["e7", "e5", "c:p"])
-  ],
-  status: "in_progress",
-  meta: Sashite::Pcn::Meta.new(
-    event: "World Championship",
-    round: 5
-  ),
-  sides: Sashite::Pcn::Sides.new(
-    first: Sashite::Pcn::Player.new(name: "Alice", elo: 2800, style: "CHESS"),
-    second: Sashite::Pcn::Player.new(name: "Bob", elo: 2750, style: "chess")
-  )
+# Minimal valid game (only setup required, all other fields optional)
+game = Sashite::Pcn.parse(
+  setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
 )
+
+# Equivalent to:
+game = Sashite::Pcn.parse(
+  setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
+  meta: {},
+  sides: {},
+  moves: [],
+  status: nil
+)
+
+# Chess puzzle (position without moves)
+puzzle = Sashite::Pcn.parse(
+  meta: { name: "Mate in 2" },
+  setup: "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR / C/c"
+  # sides, moves, and status omitted (use default values)
+)
+
+# Partial player information (only first player)
+game = Sashite::Pcn.parse(
+  sides: {
+    first: { name: "Alice", elo: 2100 }
+    # second omitted (defaults to {})
+  },
+  setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
+)
+
+# Complete game with metadata
+game = Sashite::Pcn.parse(
+  meta: {
+    event: "World Championship",
+    location: "London",
+    started_on: "2024-11-20"
+  },
+  sides: {
+    first: { name: "Carlsen", elo: 2830, style: "CHESS" },
+    second: { name: "Nakamura", elo: 2794, style: "chess" }
+  },
+  setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
+  moves: [
+    ["e2", "e4"],
+    ["c7", "c5"]
+  ],
+  status: "in_progress"
+)
+```
+
+### Common Use Cases
+```ruby
+# Position without moves (puzzle, endgame study, analysis)
+puzzle = Sashite::Pcn.parse(
+  meta: { name: "Lucena Position" },
+  setup: "1K6/1P6/8/8/8/8/r7/2k5 / C/c"
+  # moves omitted (defaults to [])
+)
+
+# Terminal position with status
+terminal = Sashite::Pcn.parse(
+  setup: "7k/5Q2/6K1/8/8/8/8/8 / C/c",
+  status: "stalemate"
+  # moves omitted (defaults to [])
+)
+
+# Game template (starting position)
+template = Sashite::Pcn.parse(
+  sides: {
+    first: { style: "CHESS" },
+    second: { style: "chess" }
+  },
+  setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
+  # meta, moves, and status omitted (use default values)
+)
+
+# Position with inferable status (checkmate can be inferred from position)
+game = Sashite::Pcn.parse(
+  setup: "r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR / c/C",
+  moves: [
+    ["f1", "c4"],
+    ["g8", "f6"],
+    ["d1", "h5"],
+    ["f6", "h5"]
+  ]
+  # status omitted (defaults to nil, can be inferred as "checkmate")
+)
+
+# Game with explicit-only status (must be declared)
+game = Sashite::Pcn.parse(
+  setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
+  moves: [
+    ["e2", "e4"],
+    ["c7", "c5"]
+  ],
+  status: "resignation"  # Cannot be inferred, must be explicit
+)
+```
+
+### Immutability and Transformations
+```ruby
+# All objects are frozen
+game.frozen?  # => true
+game.meta.frozen?  # => true
+
+# Transformations return new instances
+new_game = game.add_move(["g1", "f3"])
+new_game.moves.length  # => 3
+game.moves.length      # => 2 (unchanged)
+
+# Update metadata
+updated = game.with_status("resignation")
+updated.status  # => "resignation"
+game.status     # => "in_progress" (unchanged)
 ```
 
 ### Accessing Game Data
-
 ```ruby
-game = Sashite::Pcn.parse(pcn_hash)
+# Metadata access (empty hash if omitted)
+game.meta              # => {} or { event: "...", location: "...", ... }
+game.meta[:event]      # => "World Championship" or nil
+game.started_on        # => "2024-11-20" or nil
 
-# Required fields
-game.setup                                   # => Feen::Position
-game.setup.to_s                              # => FEEN string
-game.moves                                   # => Array of Pmn::Move
-game.moves.size                              # => Number of moves
-game.moves.first.to_a                        # => PMN array
+# Player information (empty hash if omitted)
+game.sides             # => {} or { first: {...}, second: {...} }
+game.first_player      # => { name: "Carlsen", elo: 2830, style: "CHESS" } or {}
+game.second_player     # => { name: "Nakamura", elo: 2794, style: "chess" } or {}
 
-# Optional fields (may be nil)
-game.status                                  # => "in_progress" or nil
-game.meta                                    # => Meta object or nil
-game.sides                                   # => Sides object or nil
+# Move access (always returns array, empty if omitted)
+game.moves             # => [[...], [...]] or []
+game.move_at(0)        # => ["e2", "e4"] or nil
+game.move_count        # => 2 or 0
 
-# Metadata access (when present)
-game.meta&.event                             # => "World Championship"
-game.meta&.round                             # => 5
-game.meta&.started_on                        # => "2025-11-15"
-game.meta&.finished_at                       # => "2025-11-15T18:45:00Z"
-
-# Player information (when present)
-game.sides&.first&.name                      # => "Alice"
-game.sides&.first&.elo                       # => 2800
-game.sides&.first&.style                     # => "CHESS"
-game.sides&.second&.name                     # => "Bob"
+# Status (nil if omitted)
+game.status            # => "in_progress" or nil
+game.finished?         # => false
+game.in_progress?      # => true
 ```
 
-### Validation
-
+### JSON Serialization
 ```ruby
-# Structural validation
-game.valid?                                  # => true/false
+# Convert to hash (ready for JSON)
+game.to_h
+# => {
+#   "meta" => { "event" => "...", ... },
+#   "sides" => { "first" => {...}, "second" => {...} },
+#   "setup" => "...",
+#   "moves" => [[...], [...]],
+#   "status" => "in_progress"
+# }
 
-# Detailed validation with errors
-begin
-  Sashite::Pcn.parse(invalid_hash)
-rescue Sashite::Pcn::Error => e
-  puts e.message
-  puts e.class  # Specific error type
-end
+# Minimal game (only required field + moves array)
+minimal = Sashite::Pcn.parse(setup: "8/8/8/8/8/8/8/8 / U/u")
+minimal.to_h
+# => {
+#   "setup" => "8/8/8/8/8/8/8/8 / U/u",
+#   "moves" => []  # Always included in serialization
+# }
+# Note: meta, sides, and status omitted when at default values
 
-# Validate individual components
-Sashite::Pcn::Meta.valid?(meta_hash)        # => true/false
-Sashite::Pcn::Sides.valid?(sides_hash)      # => true/false
-Sashite::Pcn::Player.valid?(player_hash)    # => true/false
-```
-
-### Working with Moves
-
-```ruby
-# Add moves to a game (returns new game)
-game = Sashite::Pcn.parse(pcn_hash)
-new_move = Sashite::Pmn.parse(["g1", "f3", "C:N"])
-updated_game = game.add_move(new_move)
-
-# Iterate over moves
-game.moves.each_with_index do |move, index|
-  player = index.even? ? "First player" : "Second player"
-  puts "#{player}: #{move.to_a.inspect}"
-end
-
-# Get move count
-game.move_count                              # => 2
-game.empty?                                  # => false
-```
-
-### Immutable Transformations
-
-```ruby
-# All transformations return new instances
-original = Sashite::Pcn.parse(pcn_hash)
-
-# Update status
-finished = original.with_status("checkmate")
-finished.status                              # => "checkmate"
-original.status                              # => "in_progress" (unchanged)
-
-# Update metadata
-with_meta = original.with_meta(
-  Sashite::Pcn::Meta.new(event: "Tournament")
+# Game with some fields at default values
+partial = Sashite::Pcn.parse(
+  meta: { name: "Study" },
+  setup: "8/8/8/8/8/8/8/8 / U/u"
 )
+partial.to_h
+# => {
+#   "meta" => { "name" => "Study" },
+#   "setup" => "8/8/8/8/8/8/8/8 / U/u",
+#   "moves" => []
+# }
+# Note: sides and status omitted (at default values)
 
-# Chain transformations
-result = original
-  .with_status("checkmate")
-  .add_move(new_move)
-  .with_meta(updated_meta)
+# Use with any JSON library
+require "json"
+json_string = JSON.generate(game.to_h)
+
+# Parse from JSON
+parsed = Sashite::Pcn.parse(JSON.parse(json_string))
 ```
 
-## Format Specification
-
-### Document Structure
-
+### Functional Operations
 ```ruby
-{
-  "meta" => {                               # Optional metadata
-    "name" => String,
-    "event" => String,
-    "location" => String,
-    "round" => Integer,
-    "started_on" => "YYYY-MM-DD",
-    "finished_at" => "YYYY-MM-DDTHH:MM:SSZ",
-    "href" => String
-  },
-  "sides" => {                              # Optional player information
-    "first" => {
-      "style" => String,                    # SNN format
-      "name" => String,
-      "elo" => Integer
-    },
-    "second" => {
-      "style" => String,
-      "name" => String,
-      "elo" => Integer
-    }
-  },
-  "setup" => String,                        # Required: FEEN position
-  "moves" => Array,                         # Required: PMN arrays
-  "status" => String                        # Optional: game status
-}
+# Chain transformations (starting from minimal game)
+game = Sashite::Pcn.parse(setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c")
+  .add_move(["e2", "e4"])
+  .add_move(["e7", "e5"])
+  .with_meta(event: "Casual Game")
+  .with_status("in_progress")
+
+# Map over moves
+move_notations = game.moves.map { |move| move.join("-") }
+
+# Filter and select
+queens_moves = game.moves.select { |move| move[2]&.include?("Q") }
 ```
 
-### Valid Status Values
+## Properties
 
-- `"in_progress"` - Game ongoing
-- `"checkmate"` - Terminal piece checkmated
-- `"stalemate"` - No legal moves available
-- `"bare_king"` - Only terminal piece remains
-- `"mare_king"` - Terminal piece captured
-- `"resignation"` - Player resigned
-- `"illegal_move"` - Illegal move performed
-- `"time_limit"` - Time exceeded
-- `"move_limit"` - Move limit reached
-- `"repetition"` - Position repetition
-- `"agreement"` - Players agreed to end
-- `"insufficient"` - Neither player has sufficient material to force a win
+* **Rule-agnostic**: Independent of specific game mechanics
+* **Comprehensive**: Complete game records with metadata
+* **Minimal requirements**: Only `setup` field required
+* **Smart defaults**: Optional fields (`meta`, `sides`, `moves`, `status`) have sensible defaults
+* **Immutable**: All objects frozen, transformations return new instances
+* **Functional**: Pure functions without side effects
+* **Flexible**: Supports positions without moves (puzzles, analysis, templates)
+* **Composable**: Built on PMN, FEEN, SNN, and CGSN specifications
+* **Type-safe**: Strong validation at all levels
+* **JSON-compatible**: Native Ruby hash structure ready for JSON serialization
+* **Minimal API**: Small, focused public interface
+* **Library-agnostic**: No JSON parser dependency, use your preferred library
+
+## Default Values
+
+When fields are omitted in initialization or parsing:
+
+| Field | Default Value | Description |
+|-------|---------------|-------------|
+| `meta` | `{}` | No metadata provided |
+| `sides` | `{}` | No player information |
+| `sides[:first]` | `{}` | No first player information |
+| `sides[:second]` | `{}` | No second player information |
+| `moves` | `[]` | No moves played |
+| `status` | `nil` | No explicit status declaration |
+| `setup` | *required* | Must be explicitly provided |
 
 ## API Reference
 
-### Main Module Methods
+### Class Methods
 
-- `Sashite::Pcn.parse(hash)` - Parse hash into Game object
-- `Sashite::Pcn.valid?(hash)` - Validate without raising exceptions
-- `Sashite::Pcn.new(**attributes)` - Create game from components
+- `Sashite::Pcn.parse(hash)` - Parse PCN from hash structure
+- `Sashite::Pcn.valid?(hash)` - Validate PCN structure
 
-### Game Class
+### Instance Methods
 
-#### Creation
-- `Sashite::Pcn::Game.new(setup:, moves:, status: nil, meta: nil, sides: nil)`
+#### Core Data Access
+- `#setup` - Initial position (FEEN string) **[required]**
+- `#meta` - Metadata hash (defaults to `{}`)
+- `#sides` - Player information hash (defaults to `{}`)
+- `#moves` - Move sequence array (defaults to `[]`)
+- `#status` - Game status (CGSN value or `nil`, defaults to `nil`)
 
-#### Attributes (read-only)
-- `#setup` - Feen::Position object (required)
-- `#moves` - Array of Pmn::Move objects (required)
-- `#status` - String or nil (optional)
-- `#meta` - Meta object or nil (optional)
-- `#sides` - Sides object or nil (optional)
+#### Player Access
+- `#first_player` - First player data (defaults to `{}`)
+- `#second_player` - Second player data (defaults to `{}`)
 
-#### Queries
-- `#valid?` - Check overall validity
-- `#move_count` / `#size` - Number of moves
-- `#empty?` - No moves played
-- `#has_status?` - Status field present
-- `#has_meta?` - Metadata present
-- `#has_sides?` - Player information present
+#### Move Operations
+- `#move_at(index)` - Get move at index
+- `#move_count` - Total number of moves
+- `#add_move(move)` - Return new game with added move
 
-#### Transformations (immutable)
-- `#add_move(pmn_move)` - Add move (returns new game)
-- `#with_status(status)` - Update status (returns new game)
-- `#with_meta(meta)` - Update metadata (returns new game)
-- `#with_sides(sides)` - Update player info (returns new game)
+#### Metadata Shortcuts
+- `#started_on` - Game start date
+- `#finished_at` - Game completion timestamp
+- `#event` - Event name
+- `#location` - Event location
+- `#round` - Round number
 
-#### Conversion
-- `#to_h` - Convert to hash
-- `#to_s` - Alias for pretty-printed hash representation
+#### Transformations
+- `#with_status(status)` - Return new game with status
+- `#with_meta(**meta)` - Return new game with updated metadata
+- `#with_moves(moves)` - Return new game with move sequence
 
-### Meta Class
+#### Predicates
+- `#finished?` - Check if game is finished
+- `#in_progress?` - Check if game is in progress
 
-- `Sashite::Pcn::Meta.new(**attributes)`
-- `#name`, `#event`, `#location`, `#round`
-- `#started_on`, `#finished_at`, `#href`
-- `#to_h` - Convert to hash
-- `Meta.valid?(hash)` - Validate metadata
-
-### Sides Class
-
-- `Sashite::Pcn::Sides.new(first:, second:)`
-- `#first` - First player (Player object or nil)
-- `#second` - Second player (Player object or nil)
-- `#to_h` - Convert to hash
-- `Sides.valid?(hash)` - Validate sides
-
-### Player Class
-
-- `Sashite::Pcn::Player.new(style: nil, name: nil, elo: nil)`
-- `#style` - SNN style name or nil
-- `#name` - Player name or nil
-- `#elo` - Elo rating or nil
-- `#to_h` - Convert to hash
-- `Player.valid?(hash)` - Validate player
-
-### Exceptions
-
-- `Sashite::Pcn::Error` - Base error class
-- `Sashite::Pcn::ParseError` - Structure parsing failed
-- `Sashite::Pcn::ValidationError` - Format validation failed
-- `Sashite::Pcn::SemanticError` - Semantic consistency violation
-
-## Examples
-
-### Traditional Chess Game
-
-```ruby
-chess_game = Sashite::Pcn.parse({
-  "meta" => {
-    "event" => "World Championship",
-    "round" => 5,
-    "started_on" => "2025-11-15"
-  },
-  "sides" => {
-    "first" => {
-      "name" => "Magnus Carlsen",
-      "elo" => 2830,
-      "style" => "CHESS"
-    },
-    "second" => {
-      "name" => "Fabiano Caruana",
-      "elo" => 2820,
-      "style" => "chess"
-    }
-  },
-  "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
-  "moves" => [
-    ["e2", "e4", "C:P"],
-    ["e7", "e5", "c:p"],
-    ["g1", "f3", "C:N"],
-    ["b8", "c6", "c:n"]
-  ],
-  "status" => "in_progress"
-})
-
-chess_game.move_count                        # => 4
-chess_game.sides.first.name                  # => "Magnus Carlsen"
-```
-
-### Cross-Style Game
-
-```ruby
-hybrid_game = Sashite::Pcn.parse({
-  "sides" => {
-    "first" => { "style" => "CHESS" },
-    "second" => { "style" => "makruk" }
-  },
-  "setup" => "rnsmksnr/8/pppppppp/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/m",
-  "moves" => [
-    ["e2", "e4", "C:P"],
-    ["d6", "d5", "m:p"]
-  ],
-  "status" => "in_progress"
-})
-```
-
-### Shōgi Game
-
-```ruby
-shogi_game = Sashite::Pcn.parse({
-  "setup" => "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL / S/s",
-  "moves" => [
-    ["e1", "e2", "S:P"],
-    ["*", "e5", "s:p"]  # Drop from hand
-  ],
-  "status" => "in_progress"
-})
-```
-
-### Minimal Valid Game
-
-```ruby
-minimal = Sashite::Pcn.parse({
-  "setup" => "8/8/8/8/8/8/8/8 / C/c",
-  "moves" => []
-})
-
-minimal.valid?                               # => true
-minimal.empty?                               # => true
-minimal.has_status?                          # => false
-```
-
-## Design Properties
-
-- **Rule-agnostic**: Independent of specific game mechanics
-- **Comprehensive**: Complete game records with metadata
-- **Immutable**: All objects frozen, transformations return new instances
-- **Functional**: Pure functions without side effects
-- **Composable**: Built on PMN, FEEN, and SNN specifications
-- **Type-safe**: Strong validation at all levels
-- **JSON-compatible**: Native Ruby hash structure ready for JSON serialization
-- **Minimal API**: Small, focused public interface
-- **Library-agnostic**: No JSON parser dependency, use your preferred library
-
-## Related Specifications
-
-- [PCN Specification v1.0.0](https://sashite.dev/specs/pcn/1.0.0/) - Complete technical specification
-- [PCN Examples](https://sashite.dev/specs/pcn/1.0.0/examples/) - Comprehensive examples
-- [PMN](https://sashite.dev/specs/pmn/) - Portable Move Notation
-- [FEEN](https://sashite.dev/specs/feen/) - Forsyth-Edwards Enhanced Notation
-- [SNN](https://sashite.dev/specs/snn/) - Style Name Notation
+#### Serialization
+- `#to_h` - Convert to hash (always includes `moves` array, omits fields at default values)
+- `#to_json(*args)` - Convert to JSON (if JSON library loaded)
+- `#frozen?` - Always returns true
 
 ## Documentation
 
 - [Official PCN Specification v1.0.0](https://sashite.dev/specs/pcn/1.0.0/)
-- [PCN Examples Documentation](https://sashite.dev/specs/pcn/1.0.0/examples/)
+- [PCN Examples](https://sashite.dev/specs/pcn/1.0.0/examples/)
 - [API Documentation](https://rubydoc.info/github/sashite/pcn.rb/main)
 
 ## Development
-
 ```sh
 # Clone the repository
 git clone https://github.com/sashite/pcn.rb.git

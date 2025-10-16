@@ -1,436 +1,367 @@
 # frozen_string_literal: true
 
+require "sashite/cgsn"
+require "sashite/feen"
+require "sashite/pmn"
+require "sashite/snn"
+
+require_relative "game/meta"
+require_relative "game/sides"
+
 module Sashite
   module Pcn
-    # Immutable representation of a complete game record.
+    # Represents a complete game record in PCN (Portable Chess Notation) format.
     #
-    # A Game consists of:
-    # - setup: Initial position (FEEN format) [required]
-    # - moves: Sequence of moves (PMN format) [required]
-    # - status: Game status [optional]
-    # - meta: Metadata [optional]
-    # - sides: Player information [optional]
+    # A game consists of an initial position (setup), optional move sequence,
+    # optional game status, optional metadata, and optional player information.
+    # All instances are immutable - transformations return new instances.
     #
-    # @see https://sashite.dev/specs/pcn/1.0.0/
+    # All parameters are validated at initialization time. An instance of Game
+    # cannot be created with invalid data.
+    #
+    # @example Minimal game
+    #   game = Game.new(setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c")
+    #
+    # @example Complete game
+    #   game = Game.new(
+    #     meta: { event: "World Championship" },
+    #     sides: {
+    #       first: { name: "Carlsen", elo: 2830, style: "CHESS" },
+    #       second: { name: "Nakamura", elo: 2794, style: "chess" }
+    #     },
+    #     setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
+    #     moves: [["e2", "e4"], ["c7", "c5"]],
+    #     status: "in_progress"
+    #   )
     class Game
-      # Valid status values according to PCN specification.
-      VALID_STATUSES = %w[
-        in_progress
-        checkmate
-        stalemate
-        bare_king
-        mare_king
-        resignation
-        illegal_move
-        time_limit
-        move_limit
-        repetition
-        agreement
-        insufficient
-      ].freeze
+      # Error messages
+      ERROR_MISSING_SETUP = "setup is required"
+      ERROR_INVALID_MOVES = "moves must be an array"
+      ERROR_INVALID_META = "meta must be a hash"
+      ERROR_INVALID_SIDES = "sides must be a hash"
 
-      # @return [Feen::Position] Initial position
-      attr_reader :setup
+      # Status constants
+      STATUS_IN_PROGRESS = "in_progress"
 
-      # @return [Array<Pmn::Move>] Move sequence
-      attr_reader :moves
-
-      # @return [String, nil] Game status
-      attr_reader :status
-
-      # @return [Meta, nil] Metadata
-      attr_reader :meta
-
-      # @return [Sides, nil] Player information
-      attr_reader :sides
-
-      # Parse a PCN hash into a Game object.
+      # Create a new game instance
       #
-      # @param hash [Hash] PCN document hash
-      # @return [Game] Immutable game object
-      # @raise [Error::Parse] If structure is invalid
-      # @raise [Error::Validation] If format is invalid
-      #
-      # @example
-      #   game = Game.parse({
-      #     "setup" => "8/8/8/8/8/8/8/8 / C/c",
-      #     "moves" => []
-      #   })
-      def self.parse(hash)
-        validate_structure!(hash)
+      # @param setup [String] initial position in FEEN format (required)
+      # @param moves [Array<Array>] sequence of moves in PMN format (optional, defaults to [])
+      # @param status [String, nil] game status in CGSN format (optional)
+      # @param meta [Hash] game metadata (optional)
+      # @param sides [Hash] player information (optional)
+      # @raise [ArgumentError] if required fields are missing or invalid
+      def initialize(setup:, moves: [], status: nil, meta: {}, sides: {})
+        # Validate and parse setup (required)
+        raise ::ArgumentError, ERROR_MISSING_SETUP if setup.nil?
+        @setup = ::Sashite::Feen.parse(setup)
 
-        setup = parse_setup(hash["setup"])
-        moves = parse_moves(hash["moves"])
-        status = hash["status"]
-        meta = parse_meta(hash["meta"])
-        sides = parse_sides(hash["sides"])
+        # Validate and parse moves (optional, defaults to [])
+        raise ::ArgumentError, ERROR_INVALID_MOVES unless moves.is_a?(::Array)
+        @moves = moves.map { |move| ::Sashite::Pmn.parse(move) }.freeze
 
-        new(
-          setup:  setup,
-          moves:  moves,
-          status: status,
-          meta:   meta,
-          sides:  sides
-        )
-      end
+        # Validate and parse status (optional)
+        @status = status.nil? ? nil : ::Sashite::Cgsn.parse(status)
 
-      # Validate a PCN hash without raising exceptions.
-      #
-      # @param hash [Hash] PCN document hash
-      # @return [Boolean] true if valid, false otherwise
-      #
-      # @example
-      #   Game.valid?({ "setup" => "...", "moves" => [] })  # => true
-      def self.valid?(hash)
-        parse(hash)
-        true
-      rescue Error
-        false
-      end
+        # Validate meta (optional)
+        raise ::ArgumentError, ERROR_INVALID_META unless meta.is_a?(::Hash)
+        @meta = Meta.new(**meta.transform_keys(&:to_sym))
 
-      # Create a new Game.
-      #
-      # @param setup [Feen::Position, String] Initial position
-      # @param moves [Array<Pmn::Move, Array>] Move sequence
-      # @param status [String, nil] Game status
-      # @param meta [Meta, Hash, nil] Metadata
-      # @param sides [Sides, Hash, nil] Player information
-      # @raise [Error::Validation] If validation fails
-      #
-      # @example
-      #   game = Game.new(
-      #     setup: Feen.parse("8/8/8/8/8/8/8/8 / C/c"),
-      #     moves: []
-      #   )
-      def initialize(setup:, moves:, status: nil, meta: nil, sides: nil)
-        @setup = normalize_setup(setup)
-        @moves = normalize_moves(moves)
-        @status = normalize_status(status)
-        @meta = normalize_meta(meta)
-        @sides = normalize_sides(sides)
-
-        validate!
+        # Validate sides (optional)
+        raise ::ArgumentError, ERROR_INVALID_SIDES unless sides.is_a?(::Hash)
+        @sides = Sides.new(**sides.transform_keys(&:to_sym))
 
         freeze
       end
 
-      # Check if the game is valid.
-      #
-      # @return [Boolean] true if valid
-      def valid?
-        validate!
-        true
-      rescue Error
-        false
-      end
+      # ========================================================================
+      # Core Data Access
+      # ========================================================================
 
-      # Get the number of moves.
+      # Get initial position
       #
-      # @return [Integer] Move count
-      def move_count
-        moves.size
-      end
-      alias size move_count
-      alias length move_count
-
-      # Check if no moves have been played.
-      #
-      # @return [Boolean] true if no moves
-      def empty?
-        moves.empty?
-      end
-
-      # Check if status is present.
-      #
-      # @return [Boolean] true if status field exists
-      def has_status?
-        !status.nil?
-      end
-
-      # Check if metadata is present.
-      #
-      # @return [Boolean] true if meta field exists
-      def has_meta?
-        !meta.nil?
-      end
-
-      # Check if player information is present.
-      #
-      # @return [Boolean] true if sides field exists
-      def has_sides?
-        !sides.nil?
-      end
-
-      # Add a move to the game.
-      #
-      # @param move [Pmn::Move, Array] Move to add
-      # @return [Game] New game with added move
+      # @return [Sashite::Feen::Position] initial position in FEEN format
       #
       # @example
-      #   new_game = game.add_move(["e2", "e4", "C:P"])
-      def add_move(move)
-        normalized_move = move.is_a?(::Sashite::Pmn::Move) ? move : ::Sashite::Pmn.parse(move)
+      #   game.setup  # => #<Sashite::Feen::Position ...>
+      def setup
+        @setup
+      end
 
+      # Get game metadata
+      #
+      # @return [Meta] metadata object
+      #
+      # @example
+      #   game.meta  # => #<Sashite::Pcn::Game::Meta ...>
+      def meta
+        @meta
+      end
+
+      # Get player information
+      #
+      # @return [Sides] sides object
+      #
+      # @example
+      #   game.sides  # => #<Sashite::Pcn::Game::Sides ...>
+      def sides
+        @sides
+      end
+
+      # Get move sequence
+      #
+      # @return [Array<Sashite::Pmn::Move>] frozen array of moves
+      #
+      # @example
+      #   game.moves  # => [#<Sashite::Pmn::Move ...>, ...]
+      def moves
+        @moves
+      end
+
+      # Get game status
+      #
+      # @return [Sashite::Cgsn::Status, nil] status object or nil
+      #
+      # @example
+      #   game.status  # => #<Sashite::Cgsn::Status ...>
+      def status
+        @status
+      end
+
+      # ========================================================================
+      # Player Access
+      # ========================================================================
+
+      # Get first player information
+      #
+      # @return [Hash, nil] first player data or nil if not defined
+      #
+      # @example
+      #   game.first_player  # => { name: "Carlsen", elo: 2830, style: "CHESS" }
+      def first_player
+        @sides.first
+      end
+
+      # Get second player information
+      #
+      # @return [Hash, nil] second player data or nil if not defined
+      #
+      # @example
+      #   game.second_player  # => { name: "Nakamura", elo: 2794, style: "chess" }
+      def second_player
+        @sides.second
+      end
+
+      # ========================================================================
+      # Move Operations
+      # ========================================================================
+
+      # Get move at specified index
+      #
+      # @param index [Integer] move index (0-based)
+      # @return [Sashite::Pmn::Move, nil] move at index or nil if out of bounds
+      #
+      # @example
+      #   game.move_at(0)  # => #<Sashite::Pmn::Move ...>
+      def move_at(index)
+        @moves[index]
+      end
+
+      # Get total number of moves
+      #
+      # @return [Integer] number of moves in the game
+      #
+      # @example
+      #   game.move_count  # => 2
+      def move_count
+        @moves.length
+      end
+
+      # Add a move to the game
+      #
+      # @param move [Array] move in PMN format
+      # @return [Game] new game instance with added move
+      #
+      # @example
+      #   new_game = game.add_move(["g1", "f3"])
+      def add_move(move)
+        new_moves = @moves.map(&:to_a) + [move]
         self.class.new(
-          setup:  setup,
-          moves:  moves + [normalized_move],
-          status: status,
-          meta:   meta,
-          sides:  sides
+          setup: @setup.to_s,
+          moves: new_moves,
+          status: @status&.to_s,
+          meta: @meta.to_h,
+          sides: @sides.to_h
         )
       end
 
-      # Update the game status.
+      # ========================================================================
+      # Metadata Shortcuts
+      # ========================================================================
+
+      # Get game start date
       #
-      # @param new_status [String, nil] New status value
-      # @return [Game] New game with updated status
+      # @return [String, nil] start date in ISO 8601 format
       #
       # @example
-      #   finished = game.with_status("checkmate")
+      #   game.started_on  # => "2024-11-20"
+      def started_on
+        @meta[:started_on]
+      end
+
+      # Get game completion timestamp
+      #
+      # @return [String, nil] completion timestamp in ISO 8601 format with UTC
+      #
+      # @example
+      #   game.finished_at  # => "2024-11-20T18:45:00Z"
+      def finished_at
+        @meta[:finished_at]
+      end
+
+      # Get event name
+      #
+      # @return [String, nil] event name
+      #
+      # @example
+      #   game.event  # => "World Championship"
+      def event
+        @meta[:event]
+      end
+
+      # Get event location
+      #
+      # @return [String, nil] location
+      #
+      # @example
+      #   game.location  # => "London"
+      def location
+        @meta[:location]
+      end
+
+      # Get round number
+      #
+      # @return [Integer, nil] round number
+      #
+      # @example
+      #   game.round  # => 5
+      def round
+        @meta[:round]
+      end
+
+      # ========================================================================
+      # Transformations
+      # ========================================================================
+
+      # Create new game with updated status
+      #
+      # @param new_status [String, nil] new status value
+      # @return [Game] new game instance with updated status
+      #
+      # @example
+      #   updated = game.with_status("resignation")
       def with_status(new_status)
         self.class.new(
-          setup:  setup,
-          moves:  moves,
+          setup: @setup.to_s,
+          moves: @moves.map(&:to_a),
           status: new_status,
-          meta:   meta,
-          sides:  sides
+          meta: @meta.to_h,
+          sides: @sides.to_h
         )
       end
 
-      # Update the metadata.
+      # Create new game with updated metadata
       #
-      # @param new_meta [Meta, Hash, nil] New metadata
-      # @return [Game] New game with updated metadata
+      # @param new_meta [Hash] metadata to merge
+      # @return [Game] new game instance with updated metadata
       #
       # @example
-      #   updated = game.with_meta(Meta.new(event: "Tournament"))
-      def with_meta(new_meta)
+      #   updated = game.with_meta(event: "Casual Game", round: 1)
+      def with_meta(**new_meta)
+        merged_meta = @meta.to_h.merge(new_meta)
         self.class.new(
-          setup:  setup,
-          moves:  moves,
-          status: status,
-          meta:   new_meta,
-          sides:  sides
+          setup: @setup.to_s,
+          moves: @moves.map(&:to_a),
+          status: @status&.to_s,
+          meta: merged_meta,
+          sides: @sides.to_h
         )
       end
 
-      # Update the player information.
+      # Create new game with specified move sequence
       #
-      # @param new_sides [Sides, Hash, nil] New player information
-      # @return [Game] New game with updated sides
+      # @param new_moves [Array<Array>] new move sequence
+      # @return [Game] new game instance with new moves
       #
       # @example
-      #   updated = game.with_sides(Sides.new(first: player1, second: player2))
-      def with_sides(new_sides)
+      #   updated = game.with_moves([["e2", "e4"], ["e7", "e5"]])
+      def with_moves(new_moves)
         self.class.new(
-          setup:  setup,
-          moves:  moves,
-          status: status,
-          meta:   meta,
-          sides:  new_sides
+          setup: @setup.to_s,
+          moves: new_moves,
+          status: @status&.to_s,
+          meta: @meta.to_h,
+          sides: @sides.to_h
         )
       end
 
-      # Convert to hash representation.
+      # ========================================================================
+      # Predicates
+      # ========================================================================
+
+      # Check if the game is in progress
       #
-      # @return [Hash] PCN document hash
+      # @return [Boolean, nil] true if in progress, false if finished, nil if indeterminate
       #
       # @example
-      #   game.to_h  # => { "setup" => "...", "moves" => [...], ... }
+      #   game.in_progress?  # => true
+      def in_progress?
+        return if @status.nil?
+
+        @status.to_s == STATUS_IN_PROGRESS
+      end
+
+      # Check if the game is finished
+      #
+      # @return [Boolean, nil] true if finished, false if in progress, nil if indeterminate
+      #
+      # @example
+      #   game.finished?  # => false
+      def finished?
+        return if @status.nil?
+
+        !in_progress?
+      end
+
+      # ========================================================================
+      # Serialization
+      # ========================================================================
+
+      # Convert to hash representation
+      #
+      # @return [Hash] hash with string keys ready for JSON serialization
+      #
+      # @example
+      #   game.to_h
+      #   # => {
+      #   #   "setup" => "...",
+      #   #   "moves" => [[...], [...]],
+      #   #   "status" => "in_progress",
+      #   #   "meta" => {...},
+      #   #   "sides" => {...}
+      #   # }
       def to_h
-        hash = {
-          "setup" => setup.to_s,
-          "moves" => moves.map(&:to_a)
-        }
+        result = { "setup" => @setup.to_s }
 
-        hash["status"] = status if has_status?
-        hash["meta"] = meta.to_h if has_meta?
-        hash["sides"] = sides.to_h if has_sides?
+        # Always include moves array (even if empty)
+        result["moves"] = @moves.map(&:to_a)
 
-        hash
-      end
+        # Include optional fields if present
+        result["status"] = @status.to_s if @status
+        result["meta"] = @meta.to_h unless @meta.empty?
+        result["sides"] = @sides.to_h unless @sides.empty?
 
-      # String representation.
-      #
-      # @return [String] Inspectable representation
-      def to_s
-        "#<#{self.class} setup=#{setup.to_s.inspect} moves=#{moves.size} status=#{status.inspect}>"
-      end
-      alias inspect to_s
-
-      # Equality comparison.
-      #
-      # @param other [Game] Other game
-      # @return [Boolean] true if equal
-      def ==(other)
-        other.is_a?(self.class) &&
-          other.setup == setup &&
-          other.moves == moves &&
-          other.status == status &&
-          other.meta == meta &&
-          other.sides == sides
-      end
-      alias eql? ==
-
-      # Hash code for equality.
-      #
-      # @return [Integer] Hash code
-      def hash
-        [self.class, setup, moves, status, meta, sides].hash
-      end
-
-      private
-
-      # Validate PCN hash structure.
-      def self.validate_structure!(hash)
-        raise Error::Parse, "PCN document must be a Hash, got #{hash.class}" unless hash.is_a?(::Hash)
-
-        raise Error::Parse, "Missing required field 'setup'" unless hash.key?("setup")
-
-        raise Error::Parse, "Missing required field 'moves'" unless hash.key?("moves")
-
-        return if hash["moves"].is_a?(::Array)
-
-        raise Error::Parse, "'moves' must be an Array, got #{hash['moves'].class}"
-      end
-
-      # Parse setup field.
-      def self.parse_setup(value)
-        ::Sashite::Feen.parse(value)
-      rescue ::Sashite::Feen::Error => e
-        raise Error::Validation, "Invalid setup: #{e.message}"
-      end
-
-      # Parse moves field.
-      def self.parse_moves(array)
-        array.map.with_index do |move_array, index|
-          ::Sashite::Pmn.parse(move_array)
-        rescue ::Sashite::Pmn::Error => e
-          raise Error::Validation, "Invalid move at index #{index}: #{e.message}"
-        end
-      end
-
-      # Parse meta field.
-      def self.parse_meta(value)
-        return nil if value.nil?
-
-        Meta.parse(value)
-      rescue Error => e
-        raise Error::Validation, "Invalid meta: #{e.message}"
-      end
-
-      # Parse sides field.
-      def self.parse_sides(value)
-        return nil if value.nil?
-
-        Sides.parse(value)
-      rescue Error => e
-        raise Error::Validation, "Invalid sides: #{e.message}"
-      end
-
-      # Normalize setup to Position object.
-      def normalize_setup(value)
-        return value if value.is_a?(::Sashite::Feen::Position)
-
-        ::Sashite::Feen.parse(value)
-      rescue ::Sashite::Feen::Error => e
-        raise Error::Validation, "Invalid setup: #{e.message}"
-      end
-
-      # Normalize moves to array of Move objects.
-      def normalize_moves(value)
-        raise Error::Validation, "Moves must be an Array, got #{value.class}" unless value.is_a?(::Array)
-
-        value.map.with_index do |move, index|
-          next move if move.is_a?(::Sashite::Pmn::Move)
-
-          ::Sashite::Pmn.parse(move)
-        rescue ::Sashite::Pmn::Error => e
-          raise Error::Validation, "Invalid move at index #{index}: #{e.message}"
-        end
-      end
-
-      # Normalize status.
-      def normalize_status(value)
-        return nil if value.nil?
-
-        raise Error::Validation, "Status must be a String, got #{value.class}" unless value.is_a?(::String)
-
-        value
-      end
-
-      # Normalize meta.
-      def normalize_meta(value)
-        return nil if value.nil?
-        return value if value.is_a?(Meta)
-
-        Meta.parse(value)
-      end
-
-      # Normalize sides.
-      def normalize_sides(value)
-        return nil if value.nil?
-        return value if value.is_a?(Sides)
-
-        Sides.parse(value)
-      end
-
-      # Validate all fields.
-      def validate!
-        validate_setup!
-        validate_moves!
-        validate_status!
-        validate_meta!
-        validate_sides!
-      end
-
-      # Validate setup field.
-      def validate_setup!
-        return if setup.is_a?(::Sashite::Feen::Position)
-
-        raise Error::Validation, "Setup must be a Feen::Position"
-      end
-
-      # Validate moves field.
-      def validate_moves!
-        raise Error::Validation, "Moves must be an Array" unless moves.is_a?(::Array)
-
-        moves.each_with_index do |move, index|
-          raise Error::Validation, "Move at index #{index} must be a Pmn::Move" unless move.is_a?(::Sashite::Pmn::Move)
-        end
-      end
-
-      # Validate status field.
-      def validate_status!
-        return if status.nil?
-
-        raise Error::Validation, "Status must be a String, got #{status.class}" unless status.is_a?(::String)
-
-        return if VALID_STATUSES.include?(status)
-
-        raise Error::Validation, "Invalid status value: #{status.inspect}"
-      end
-
-      # Validate meta field.
-      def validate_meta!
-        return if meta.nil?
-
-        raise Error::Validation, "Meta must be a Meta object" unless meta.is_a?(Meta)
-
-        return if meta.valid?
-
-        raise Error::Validation, "Meta validation failed"
-      end
-
-      # Validate sides field.
-      def validate_sides!
-        return if sides.nil?
-
-        raise Error::Validation, "Sides must be a Sides object" unless sides.is_a?(Sides)
-
-        return if sides.valid?
-
-        raise Error::Validation, "Sides validation failed"
+        result
       end
     end
   end

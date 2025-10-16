@@ -1,7 +1,8 @@
 PATH
   remote: .
   specs:
-    sashite-pcn (0.2.0)
+    sashite-pcn (0.3.0)
+      sashite-cgsn (~> 0.1)
       sashite-feen (~> 0.3)
       sashite-pmn (~> 1.1)
       sashite-snn (~> 3.1)
@@ -74,6 +75,7 @@ GEM
       rubocop-ast (>= 1.44.0, < 2.0)
     ruby-progressbar (1.13.0)
     sashite-cell (2.0.1)
+    sashite-cgsn (0.1.0)
     sashite-epin (1.1.0)
       sashite-pin (~> 3.1.0)
     sashite-feen (0.3.0)

@@ -6,49 +6,59 @@
 # Note that changes in the inspected code, or installation of new
 # versions of RuboCop, may require this file to be generated again.
 
-# Offense count: 6
-Lint/IneffectiveAccessModifier:
+# Offense count: 7
+# This cop supports safe autocorrection (--autocorrect).
+Layout/EmptyLineAfterGuardClause:
   Exclude:
     - 'lib/sashite/pcn/game.rb'
-    - 'lib/sashite/pcn/sides.rb'
+    - 'lib/sashite/pcn/game/sides/player.rb'
 
-# Offense count: 2
+# Offense count: 16
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: AllowMultipleStyles, EnforcedHashRocketStyle, EnforcedColonStyle, EnforcedLastArgumentHashStyle.
+# SupportedHashRocketStyles: key, separator, table
+# SupportedColonStyles: key, separator, table
+# SupportedLastArgumentHashStyles: always_inspect, always_ignore, ignore_implicit, ignore_explicit
+Layout/HashAlignment:
+  Exclude:
+    - 'lib/sashite/pcn/game.rb'
+
+# Offense count: 1
 # Configuration parameters: AllowedMethods, AllowedPatterns, CountRepeatedAttributes.
 Metrics/AbcSize:
-  Max: 30
+  Max: 22
+
+# Offense count: 3
+# Configuration parameters: AllowedMethods, AllowedPatterns.
+Metrics/CyclomaticComplexity:
+  Max: 9
 
 # Offense count: 2
 # Configuration parameters: AllowedMethods, AllowedPatterns.
-Metrics/CyclomaticComplexity:
-  Max: 8
+Metrics/PerceivedComplexity:
+  Max: 11
 
 # Offense count: 1
-# Configuration parameters: CountKeywordArgs, MaxOptionalParameters.
-Metrics/ParameterLists:
-  Max: 7
-
-# Offense count: 3
-# Configuration parameters: NamePrefix, ForbiddenPrefixes, AllowedMethods, MethodDefinitionMacros, UseSorbetSigs.
-# NamePrefix: is_, has_, have_, does_
-# ForbiddenPrefixes: is_, has_, have_, does_
-# AllowedMethods: is_a?
-# MethodDefinitionMacros: define_method, define_singleton_method
-Naming/PredicatePrefix:
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: EnforcedStyle, AllowInnerSlashes.
+# SupportedStyles: slashes, percent_r, mixed
+Style/RegexpLiteral:
   Exclude:
-    - 'lib/sashite/pcn/game.rb'
-
-# Offense count: 1
-# This cop supports unsafe autocorrection (--autocorrect-all).
-# Configuration parameters: EnforcedStyle, AllowedMethods, AllowedPatterns.
-# SupportedStyles: predicate, comparison
-Style/NumericPredicate:
-  Exclude:
-    - 'lib/sashite/pcn/player.rb'
+    - 'lib/sashite/pcn/game/meta.rb'
 
 # Offense count: 2
 # This cop supports unsafe autocorrection (--autocorrect-all).
-# Configuration parameters: ConvertCodeThatCanStartToReturnNil, AllowedMethods, MaxChainLength.
-# AllowedMethods: present?, blank?, presence, try, try!
-Style/SafeNavigation:
+# Configuration parameters: AllowedMethods, AllowedPatterns.
+Style/ReturnNilInPredicateMethodDefinition:
   Exclude:
-    - 'lib/sashite/pcn/sides.rb'
+    - 'lib/sashite/pcn/game.rb'
+
+# Offense count: 10
+# This cop supports safe autocorrection (--autocorrect).
+# Configuration parameters: ExactNameMatch, AllowPredicates, AllowDSLWriters, IgnoreClassMethods, AllowedMethods.
+# AllowedMethods: to_ary, to_a, to_c, to_enum, to_h, to_hash, to_i, to_int, to_io, to_open, to_path, to_proc, to_r, to_regexp, to_str, to_s, to_sym
+Style/TrivialAccessors:
+  Exclude:
+    - 'lib/sashite/pcn/game.rb'
+    - 'lib/sashite/pcn/game/sides.rb'
+    - 'lib/sashite/pcn/game/sides/player.rb'

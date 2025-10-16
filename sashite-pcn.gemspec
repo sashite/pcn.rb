@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
   spec.files                  = ::Dir["LICENSE.md", "README.md", "lib/**/*"]
   spec.required_ruby_version  = ">= 3.2.0"
 
+  spec.add_dependency "sashite-cgsn", "~> 0.1"
   spec.add_dependency "sashite-feen", "~> 0.3"
   spec.add_dependency "sashite-pmn", "~> 1.1"
   spec.add_dependency "sashite-snn", "~> 3.1"
