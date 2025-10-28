@@ -404,7 +404,7 @@ module Sashite
 
         # Describe time control periods in human-readable format
         #
-        # @param periods [Array<Hash>, nil] period array
+        # @param periods [Array<Hash>] period array
         # @return [String] description
         def describe_periods(periods)
           return "unlimited" if periods.empty?

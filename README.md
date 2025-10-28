@@ -84,7 +84,7 @@ final_game = new_game.with_status("checkmate")
 
 ## API Documentation
 
-For complete API documentation, see [API.md](API.md).
+For complete API documentation, see [API.md](https://github.com/sashite/pcn.rb/blob/v0.4.1/API.md).
 
 The API documentation includes:
 - All classes and methods

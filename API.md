@@ -931,7 +931,7 @@ player.style.to_s # => "CHESS"
 Returns time control periods.
 
 ```ruby
-# @return [Array<Hash>, nil] period array or nil
+# @return [Array<Hash>] period array
 
 player.periods
 # => [
