@@ -27,7 +27,7 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "sashite-cgsn", "~> 0.1"
   spec.add_dependency "sashite-feen", "~> 0.3"
-  spec.add_dependency "sashite-pmn", "~> 1.1"
+  spec.add_dependency "sashite-pan", "~> 4.0"
   spec.add_dependency "sashite-snn", "~> 3.1"
 
   spec.metadata = {

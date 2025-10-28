@@ -19,7 +19,7 @@ module Sashite
     #
     # @example Parse minimal PCN
     #   game = Sashite::Pcn.parse({
-    #     "setup" => "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c"
+    #     "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
     #   })
     #
     # @example Parse complete game
@@ -29,7 +29,7 @@ module Sashite
     #       "first" => { "name" => "Carlsen", "elo" => 2830, "style" => "CHESS" },
     #       "second" => { "name" => "Nakamura", "elo" => 2794, "style" => "chess" }
     #     },
-    #     "setup" => "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
+    #     "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
     #     "moves" => [["e2", "e4"], ["e7", "e5"]],
     #     "status" => "in_progress"
     #   })

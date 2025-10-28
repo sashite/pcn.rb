@@ -2,7 +2,7 @@
 
 require "sashite/cgsn"
 require "sashite/feen"
-require "sashite/pmn"
+require "sashite/pan"
 require "sashite/snn"
 
 require_relative "game/meta"
@@ -12,31 +12,56 @@ module Sashite
   module Pcn
     # Represents a complete game record in PCN (Portable Chess Notation) format.
     #
-    # A game consists of an initial position (setup), optional move sequence,
-    # optional game status, optional metadata, and optional player information.
+    # A game consists of an initial position (setup), optional move sequence with time tracking,
+    # optional game status, optional metadata, and optional player information with time control.
     # All instances are immutable - transformations return new instances.
     #
     # All parameters are validated at initialization time. An instance of Game
     # cannot be created with invalid data.
     #
     # @example Minimal game
-    #   game = Game.new(setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c")
+    #   game = Game.new(setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c")
     #
-    # @example Complete game
+    # @example Complete game with time tracking
     #   game = Game.new(
-    #     meta: { event: "World Championship" },
-    #     sides: {
-    #       first: { name: "Carlsen", elo: 2830, style: "CHESS" },
-    #       second: { name: "Nakamura", elo: 2794, style: "chess" }
+    #     meta: {
+    #       event: "World Championship",
+    #       started_at: "2025-01-27T14:00:00Z"
     #     },
-    #     setup: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR / C/c",
-    #     moves: [["e2", "e4"], ["c7", "c5"]],
+    #     sides: {
+    #       first: {
+    #         name: "Carlsen",
+    #         elo: 2830,
+    #         style: "CHESS",
+    #         periods: [
+    #           { time: 5400, moves: 40, inc: 0 },
+    #           { time: 1800, moves: nil, inc: 30 }
+    #         ]
+    #       },
+    #       second: {
+    #         name: "Nakamura",
+    #         elo: 2794,
+    #         style: "chess",
+    #         periods: [
+    #           { time: 5400, moves: 40, inc: 0 },
+    #           { time: 1800, moves: nil, inc: 30 }
+    #         ]
+    #       }
+    #     },
+    #     setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    #     moves: [
+    #       ["e2-e4", 2.5],
+    #       ["c7-c5", 3.1]
+    #     ],
     #     status: "in_progress"
     #   )
     class Game
       # Error messages
       ERROR_MISSING_SETUP = "setup is required"
       ERROR_INVALID_MOVES = "moves must be an array"
+      ERROR_INVALID_MOVE_FORMAT = "each move must be [PAN string, seconds float] tuple"
+      ERROR_INVALID_PAN = "invalid PAN notation in move"
+      ERROR_INVALID_SECONDS = "seconds must be a non-negative number"
       ERROR_INVALID_META = "meta must be a hash"
       ERROR_INVALID_SIDES = "sides must be a hash"
 
@@ -46,10 +71,10 @@ module Sashite
       # Create a new game instance
       #
       # @param setup [String] initial position in FEEN format (required)
-      # @param moves [Array<Array>] sequence of moves in PMN format (optional, defaults to [])
+      # @param moves [Array<Array>] sequence of [PAN, seconds] tuples (optional, defaults to [])
       # @param status [String, nil] game status in CGSN format (optional)
       # @param meta [Hash] game metadata (optional)
-      # @param sides [Hash] player information (optional)
+      # @param sides [Hash] player information with time control (optional)
       # @raise [ArgumentError] if required fields are missing or invalid
       def initialize(setup:, moves: [], status: nil, meta: {}, sides: {})
         # Validate and parse setup (required)
@@ -58,7 +83,7 @@ module Sashite
 
         # Validate and parse moves (optional, defaults to [])
         raise ::ArgumentError, ERROR_INVALID_MOVES unless moves.is_a?(::Array)
-        @moves = moves.map { |move| ::Sashite::Pmn.parse(move) }.freeze
+        @moves = validate_and_parse_moves(moves).freeze
 
         # Validate and parse status (optional)
         @status = status.nil? ? nil : ::Sashite::Cgsn.parse(status)
@@ -108,12 +133,12 @@ module Sashite
         @sides
       end
 
-      # Get move sequence
+      # Get move sequence with time tracking
       #
-      # @return [Array<Sashite::Pmn::Move>] frozen array of moves
+      # @return [Array<Array>] frozen array of [PAN, seconds] tuples
       #
       # @example
-      #   game.moves  # => [#<Sashite::Pmn::Move ...>, ...]
+      #   game.moves  # => [["e2-e4", 2.5], ["e7-e5", 3.1]]
       def moves
         @moves
       end
@@ -137,7 +162,8 @@ module Sashite
       # @return [Hash, nil] first player data or nil if not defined
       #
       # @example
-      #   game.first_player  # => { name: "Carlsen", elo: 2830, style: "CHESS" }
+      #   game.first_player
+      #   # => { name: "Carlsen", elo: 2830, style: "CHESS", periods: [...] }
       def first_player
         @sides.first
       end
@@ -147,7 +173,8 @@ module Sashite
       # @return [Hash, nil] second player data or nil if not defined
       #
       # @example
-      #   game.second_player  # => { name: "Nakamura", elo: 2794, style: "chess" }
+      #   game.second_player
+      #   # => { name: "Nakamura", elo: 2794, style: "chess", periods: [...] }
       def second_player
         @sides.second
       end
@@ -159,10 +186,10 @@ module Sashite
       # Get move at specified index
       #
       # @param index [Integer] move index (0-based)
-      # @return [Sashite::Pmn::Move, nil] move at index or nil if out of bounds
+      # @return [Array, nil] [PAN, seconds] tuple at index or nil if out of bounds
       #
       # @example
-      #   game.move_at(0)  # => #<Sashite::Pmn::Move ...>
+      #   game.move_at(0)  # => ["e2-e4", 2.5]
       def move_at(index)
         @moves[index]
       end
@@ -179,13 +206,17 @@ module Sashite
 
       # Add a move to the game
       #
-      # @param move [Array] move in PMN format
+      # @param move [Array] [PAN, seconds] tuple
       # @return [Game] new game instance with added move
+      # @raise [ArgumentError] if move format is invalid
       #
       # @example
-      #   new_game = game.add_move(["g1", "f3"])
+      #   new_game = game.add_move(["g1-f3", 1.8])
       def add_move(move)
-        new_moves = @moves.map(&:to_a) + [move]
+        # Validate the new move
+        validate_move_tuple(move)
+
+        new_moves = @moves + [move]
         self.class.new(
           setup: @setup.to_s,
           moves: new_moves,
@@ -195,28 +226,66 @@ module Sashite
         )
       end
 
+      # Get the PAN notation from a move
+      #
+      # @param index [Integer] move index
+      # @return [String, nil] PAN notation or nil if out of bounds
+      #
+      # @example
+      #   game.pan_at(0)  # => "e2-e4"
+      def pan_at(index)
+        move = @moves[index]
+        move ? move[0] : nil
+      end
+
+      # Get the seconds spent on a move
+      #
+      # @param index [Integer] move index
+      # @return [Float, nil] seconds or nil if out of bounds
+      #
+      # @example
+      #   game.seconds_at(0)  # => 2.5
+      def seconds_at(index)
+        move = @moves[index]
+        move ? move[1] : nil
+      end
+
+      # Get total time spent by first player
+      #
+      # @return [Float] sum of seconds for moves at even indices
+      #
+      # @example
+      #   game.first_player_time  # => 125.3
+      def first_player_time
+        @moves.each_with_index
+              .select { |_, i| i.even? }
+              .sum { |move, _| move[1] }
+      end
+
+      # Get total time spent by second player
+      #
+      # @return [Float] sum of seconds for moves at odd indices
+      #
+      # @example
+      #   game.second_player_time  # => 132.7
+      def second_player_time
+        @moves.each_with_index
+              .select { |_, i| i.odd? }
+              .sum { |move, _| move[1] }
+      end
+
       # ========================================================================
       # Metadata Shortcuts
       # ========================================================================
 
-      # Get game start date
+      # Get game start timestamp
       #
-      # @return [String, nil] start date in ISO 8601 format
-      #
-      # @example
-      #   game.started_on  # => "2024-11-20"
-      def started_on
-        @meta[:started_on]
-      end
-
-      # Get game completion timestamp
-      #
-      # @return [String, nil] completion timestamp in ISO 8601 format with UTC
+      # @return [String, nil] start timestamp in ISO 8601 format
       #
       # @example
-      #   game.finished_at  # => "2024-11-20T18:45:00Z"
-      def finished_at
-        @meta[:finished_at]
+      #   game.started_at  # => "2025-01-27T14:00:00Z"
+      def started_at
+        @meta[:started_at]
       end
 
       # Get event name
@@ -263,7 +332,7 @@ module Sashite
       def with_status(new_status)
         self.class.new(
           setup: @setup.to_s,
-          moves: @moves.map(&:to_a),
+          moves: @moves,
           status: new_status,
           meta: @meta.to_h,
           sides: @sides.to_h
@@ -281,7 +350,7 @@ module Sashite
         merged_meta = @meta.to_h.merge(new_meta)
         self.class.new(
           setup: @setup.to_s,
-          moves: @moves.map(&:to_a),
+          moves: @moves,
           status: @status&.to_s,
           meta: merged_meta,
           sides: @sides.to_h
@@ -290,11 +359,12 @@ module Sashite
 
       # Create new game with specified move sequence
       #
-      # @param new_moves [Array<Array>] new move sequence
+      # @param new_moves [Array<Array>] new move sequence of [PAN, seconds] tuples
       # @return [Game] new game instance with new moves
+      # @raise [ArgumentError] if move format is invalid
       #
       # @example
-      #   updated = game.with_moves([["e2", "e4"], ["e7", "e5"]])
+      #   updated = game.with_moves([["e2-e4", 2.0], ["e7-e5", 3.0]])
       def with_moves(new_moves)
         self.class.new(
           setup: @setup.to_s,
@@ -345,7 +415,7 @@ module Sashite
       #   game.to_h
       #   # => {
       #   #   "setup" => "...",
-      #   #   "moves" => [[...], [...]],
+      #   #   "moves" => [["e2-e4", 2.5], ["e7-e5", 3.1]],
       #   #   "status" => "in_progress",
       #   #   "meta" => {...},
       #   #   "sides" => {...}
@@ -354,7 +424,7 @@ module Sashite
         result = { "setup" => @setup.to_s }
 
         # Always include moves array (even if empty)
-        result["moves"] = @moves.map(&:to_a)
+        result["moves"] = @moves
 
         # Include optional fields if present
         result["status"] = @status.to_s if @status
@@ -362,6 +432,51 @@ module Sashite
         result["sides"] = @sides.to_h unless @sides.empty?
 
         result
+      end
+
+      private
+
+      # Validate and parse moves array
+      #
+      # @param moves [Array] array of move tuples
+      # @return [Array<Array>] validated moves
+      # @raise [ArgumentError] if any move is invalid
+      def validate_and_parse_moves(moves)
+        moves.map.with_index do |move, index|
+          validate_move_tuple(move, index)
+        end
+      end
+
+      # Validate a single move tuple
+      #
+      # @param move [Array] [PAN, seconds] tuple
+      # @param index [Integer, nil] optional index for error messages
+      # @raise [ArgumentError] if move format is invalid
+      def validate_move_tuple(move, index = nil)
+        position = index ? " at index #{index}" : ""
+
+        # Check it's an array with exactly 2 elements
+        raise ::ArgumentError, "#{ERROR_INVALID_MOVE_FORMAT}#{position}" unless move.is_a?(::Array) && move.length == 2
+
+        pan_notation, seconds = move
+
+        # Validate PAN notation
+        unless pan_notation.is_a?(::String)
+          raise ::ArgumentError, "#{ERROR_INVALID_PAN}#{position}: PAN must be a string"
+        end
+
+        # Parse PAN to validate format (this will raise if invalid)
+        begin
+          ::Sashite::Pan.parse(pan_notation)
+        rescue StandardError => e
+          raise ::ArgumentError, "#{ERROR_INVALID_PAN}#{position}: #{e.message}"
+        end
+
+        # Validate seconds (must be a non-negative number)
+        raise ::ArgumentError, "#{ERROR_INVALID_SECONDS}#{position}" unless seconds.is_a?(::Numeric) && seconds >= 0
+
+        # Return the move tuple with seconds as float
+        [pan_notation, seconds.to_f].freeze
       end
     end
   end

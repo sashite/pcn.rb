@@ -10,20 +10,21 @@ module Sashite
       #
       # @example With standard fields
       #   meta = Meta.new(
+      #     name: "Italian Game",
       #     event: "World Championship",
       #     location: "London",
       #     round: 5,
-      #     started_on: "2024-11-20",
-      #     finished_at: "2024-11-20T18:45:00Z",
+      #     started_at: "2025-01-27T14:00:00Z",
       #     href: "https://example.com/game/123"
       #   )
       #
       # @example With custom fields
       #   meta = Meta.new(
-      #     event: "Tournament",
+      #     event: "Online Tournament",
       #     platform: "lichess.org",
-      #     time_control: "3+2",
-      #     rated: true
+      #     time_control: "5+3",
+      #     rated: true,
+      #     opening_eco: "C50"
       #   )
       #
       # @example Empty metadata
@@ -34,21 +35,25 @@ module Sashite
         ERROR_INVALID_EVENT = "event must be a string"
         ERROR_INVALID_LOCATION = "location must be a string"
         ERROR_INVALID_ROUND = "round must be a positive integer (>= 1)"
-        ERROR_INVALID_STARTED_ON = "started_on must be in ISO 8601 date format (YYYY-MM-DD)"
-        ERROR_INVALID_FINISHED_AT = "finished_at must be in ISO 8601 datetime format with UTC (YYYY-MM-DDTHH:MM:SSZ)"
+        ERROR_INVALID_STARTED_AT = "started_at must be in ISO 8601 datetime format (e.g., 2025-01-27T14:00:00Z)"
         ERROR_INVALID_HREF = "href must be an absolute URL (http:// or https://)"
 
         # Standard field keys
-        STANDARD_FIELDS = %i[name event location round started_on finished_at href].freeze
+        STANDARD_FIELDS = %i[name event location round started_at href].freeze
 
         # Regular expressions for validation
-        DATE_PATTERN = /\A\d{4}-\d{2}-\d{2}\z/
-        DATETIME_PATTERN = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\z/
+        # ISO 8601 datetime - accepts various formats:
+        # - Basic: 2025-01-27T14:00:00Z
+        # - With milliseconds: 2025-01-27T14:00:00.123Z
+        # - With timezone offset: 2025-01-27T14:00:00+02:00
+        # - Local time without timezone: 2025-01-27T14:00:00
+        DATETIME_PATTERN = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\z/
         URL_PATTERN = /\Ahttps?:\/\/.+/
 
         # Create a new Meta instance
         #
         # @param fields [Hash] metadata with optional standard and custom fields
+        # @raise [ArgumentError] if standard field values don't meet validation requirements
         def initialize(**fields)
           @data = {}
 
@@ -68,6 +73,7 @@ module Sashite
         #
         # @example
         #   meta[:event]  # => "World Championship"
+        #   meta["started_at"]  # => "2025-01-27T14:00:00Z"
         def [](key)
           @data[key.to_sym]
         end
@@ -82,15 +88,81 @@ module Sashite
           @data.empty?
         end
 
+        # Get all metadata keys
+        #
+        # @return [Array<Symbol>] array of defined field keys
+        #
+        # @example
+        #   meta.keys  # => [:event, :round, :platform]
+        def keys
+          @data.keys
+        end
+
+        # Check if a metadata field is present
+        #
+        # @param key [Symbol, String] the metadata key
+        # @return [Boolean] true if the field is defined
+        #
+        # @example
+        #   meta.key?(:event)  # => true
+        #   meta.key?("round")  # => true
+        def key?(key)
+          @data.key?(key.to_sym)
+        end
+
+        # Iterate over each metadata field
+        #
+        # @yield [key, value] yields each key-value pair
+        # @return [Enumerator] if no block given
+        #
+        # @example
+        #   meta.each { |k, v| puts "#{k}: #{v}" }
+        def each(&)
+          return @data.each unless block_given?
+
+          @data.each(&)
+        end
+
         # Convert to hash representation
         #
         # @return [Hash] hash with all defined metadata fields
         #
         # @example
         #   meta.to_h
-        #   # => { event: "Tournament", round: 5, platform: "lichess.org" }
+        #   # => {
+        #   #   event: "Tournament",
+        #   #   round: 5,
+        #   #   started_at: "2025-01-27T14:00:00Z",
+        #   #   platform: "lichess.org"
+        #   # }
         def to_h
           @data.dup.freeze
+        end
+
+        # String representation for debugging
+        #
+        # @return [String] string representation
+        def inspect
+          "#<#{self.class.name} #{@data.inspect}>"
+        end
+
+        # Check equality with another Meta object
+        #
+        # @param other [Object] object to compare
+        # @return [Boolean] true if equal
+        def ==(other)
+          return false unless other.is_a?(self.class)
+
+          @data == other.to_h
+        end
+
+        alias eql? ==
+
+        # Hash code for use in collections
+        #
+        # @return [Integer] hash code
+        def hash
+          @data.hash
         end
 
         private
@@ -110,10 +182,8 @@ module Sashite
             validate_location(value)
           when :round
             validate_round(value)
-          when :started_on
-            validate_started_on(value)
-          when :finished_at
-            validate_finished_at(value)
+          when :started_at
+            validate_started_at(value)
           when :href
             validate_href(value)
           else
@@ -147,16 +217,15 @@ module Sashite
           raise ::ArgumentError, ERROR_INVALID_ROUND unless value >= 1
         end
 
-        # Validate started_on field (ISO 8601 date format)
-        def validate_started_on(value)
-          raise ::ArgumentError, ERROR_INVALID_STARTED_ON unless value.is_a?(::String)
-          raise ::ArgumentError, ERROR_INVALID_STARTED_ON unless value.match?(DATE_PATTERN)
-        end
-
-        # Validate finished_at field (ISO 8601 datetime format with Z)
-        def validate_finished_at(value)
-          raise ::ArgumentError, ERROR_INVALID_FINISHED_AT unless value.is_a?(::String)
-          raise ::ArgumentError, ERROR_INVALID_FINISHED_AT unless value.match?(DATETIME_PATTERN)
+        # Validate started_at field (ISO 8601 datetime format)
+        # Accepts various ISO 8601 formats:
+        # - 2025-01-27T14:00:00Z (UTC)
+        # - 2025-01-27T14:00:00+02:00 (with timezone offset)
+        # - 2025-01-27T14:00:00.123Z (with milliseconds)
+        # - 2025-01-27T14:00:00 (local time, no timezone)
+        def validate_started_at(value)
+          raise ::ArgumentError, ERROR_INVALID_STARTED_AT unless value.is_a?(::String)
+          raise ::ArgumentError, ERROR_INVALID_STARTED_AT unless value.match?(DATETIME_PATTERN)
         end
 
         # Validate href field (absolute URL with http:// or https://)

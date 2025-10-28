@@ -24,6 +24,8 @@ AllCops:
   
     - lib/sashite/pcn/.DS_Store
   
+    - lib/sashite/pcn/game/.DS_Store
+  
     - pkg/
   
     - tmp/

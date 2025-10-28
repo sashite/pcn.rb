@@ -1,10 +1,10 @@
 PATH
   remote: .
   specs:
-    sashite-pcn (0.3.0)
+    sashite-pcn (0.4.0)
       sashite-cgsn (~> 0.1)
       sashite-feen (~> 0.3)
-      sashite-pmn (~> 1.1)
+      sashite-pan (~> 4.0)
       sashite-snn (~> 3.1)
 
 GEM
@@ -13,23 +13,23 @@ GEM
     ast (2.4.3)
     date (3.4.1)
     docile (1.4.1)
-    erb (5.1.1)
+    erb (5.1.3)
     io-console (0.8.1)
     irb (1.15.2)
       pp (>= 0.6.0)
       rdoc (>= 4.0.0)
       reline (>= 0.4.2)
-    json (2.15.1)
+    json (2.15.2)
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
     parallel (1.27.0)
-    parser (3.3.9.0)
+    parser (3.3.10.0)
       ast (~> 2.4.1)
       racc
     pp (0.6.3)
       prettyprint
     prettyprint (0.2.0)
-    prism (1.5.2)
+    prism (1.6.0)
     psych (5.2.6)
       date
       stringio
@@ -43,7 +43,7 @@ GEM
     regexp_parser (2.11.3)
     reline (0.6.2)
       io-console (~> 0.5)
-    rubocop (1.81.1)
+    rubocop (1.81.6)
       json (~> 2.3)
       language_server-protocol (~> 3.17.0.2)
       lint_roller (~> 1.1.0)
@@ -62,10 +62,10 @@ GEM
     rubocop-md (2.0.3)
       lint_roller (~> 1.1)
       rubocop (>= 1.72.1)
-    rubocop-performance (1.26.0)
+    rubocop-performance (1.26.1)
       lint_roller (~> 1.1)
       rubocop (>= 1.75.0, < 2.0)
-      rubocop-ast (>= 1.44.0, < 2.0)
+      rubocop-ast (>= 1.47.1, < 2.0)
     rubocop-rake (0.7.1)
       lint_roller (~> 1.1)
       rubocop (>= 1.72.1)
@@ -81,15 +81,10 @@ GEM
     sashite-feen (0.3.0)
       sashite-epin (~> 1.1)
       sashite-sin (~> 2.1)
-    sashite-hand (1.0.0)
-    sashite-pin (3.1.0)
-    sashite-pmn (1.1.0)
+    sashite-pan (4.0.0)
       sashite-cell (~> 2.0)
-      sashite-hand (~> 1.0)
-      sashite-qpi (~> 1.0)
-    sashite-qpi (1.0.0)
-      sashite-pin (~> 3.1)
-      sashite-sin (~> 2.1)
+      sashite-epin (~> 1.1)
+    sashite-pin (3.1.0)
     sashite-sin (2.1.0)
     sashite-snn (3.1.0)
     simplecov (0.22.0)
@@ -125,4 +120,4 @@ DEPENDENCIES
   yard
 
 BUNDLED WITH
-   2.4.12
+   2.7.2
