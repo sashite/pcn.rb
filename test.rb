@@ -622,6 +622,188 @@ run_test("Sides is immutable") do
 end
 
 # ============================================================================
+# DRAW_OFFERED_BY TESTS
+# ============================================================================
+
+puts "\nDRAW_OFFERED_BY TESTS:"
+
+run_test("Game accepts draw_offered_by as nil") do
+  game = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    draw_offered_by: nil
+  )
+
+  raise "draw_offered_by should be nil" unless game.draw_offered_by.nil?
+  raise "draw_offered? should return false" if game.draw_offered?
+end
+
+run_test("Game accepts draw_offered_by as 'first'") do
+  game = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 8.0]],
+    draw_offered_by: "first"
+  )
+
+  raise "draw_offered_by should be 'first'" unless game.draw_offered_by == "first"
+  raise "draw_offered? should return true" unless game.draw_offered?
+end
+
+run_test("Game accepts draw_offered_by as 'second'") do
+  game = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 8.0], ["e7-e5", 12.0]],
+    draw_offered_by: "second"
+  )
+
+  raise "draw_offered_by should be 'second'" unless game.draw_offered_by == "second"
+  raise "draw_offered? should return true" unless game.draw_offered?
+end
+
+run_test("Game rejects invalid draw_offered_by values") do
+  # Invalid string
+  begin
+    Sashite::Pcn::Game.new(
+      setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+      draw_offered_by: "invalid"
+    )
+    raise "Invalid draw_offered_by should be rejected"
+  rescue ArgumentError => e
+    raise "Error should mention draw_offered_by" unless e.message.include?("draw_offered_by")
+  end
+
+  # Integer
+  begin
+    Sashite::Pcn::Game.new(
+      setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+      draw_offered_by: 1
+    )
+    raise "Integer draw_offered_by should be rejected"
+  rescue ArgumentError => e
+    raise "Error should mention draw_offered_by" unless e.message.include?("draw_offered_by")
+  end
+
+  # Empty string
+  begin
+    Sashite::Pcn::Game.new(
+      setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+      draw_offered_by: ""
+    )
+    raise "Empty string draw_offered_by should be rejected"
+  rescue ArgumentError => e
+    raise "Error should mention draw_offered_by" unless e.message.include?("draw_offered_by")
+  end
+end
+
+run_test("Game defaults draw_offered_by to nil when not provided") do
+  game = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
+  )
+
+  raise "draw_offered_by should default to nil" unless game.draw_offered_by.nil?
+  raise "draw_offered? should return false by default" if game.draw_offered?
+end
+
+run_test("Game with_draw_offered_by creates new game with updated offer") do
+  game = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 5.0]]
+  )
+
+  # Add draw offer
+  game_with_offer = game.with_draw_offered_by("first")
+  raise "Original game should not change" unless game.draw_offered_by.nil?
+  raise "New game should have draw offer" unless game_with_offer.draw_offered_by == "first"
+  raise "Other fields should be preserved" unless game_with_offer.moves == game.moves
+
+  # Change draw offer
+  game_other_offer = game_with_offer.with_draw_offered_by("second")
+  raise "New game should have different offer" unless game_other_offer.draw_offered_by == "second"
+
+  # Withdraw draw offer
+  game_no_offer = game_with_offer.with_draw_offered_by(nil)
+  raise "New game should have no offer" unless game_no_offer.draw_offered_by.nil?
+  raise "draw_offered? should return false" if game_no_offer.draw_offered?
+end
+
+run_test("Game with_draw_offered_by validates value") do
+  game = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
+  )
+
+  begin
+    game.with_draw_offered_by("invalid")
+    raise "Invalid draw_offered_by should be rejected"
+  rescue ArgumentError => e
+    raise "Error should mention draw_offered_by" unless e.message.include?("draw_offered_by")
+  end
+end
+
+run_test("Game to_h includes draw_offered_by when present") do
+  # With draw offer
+  game_with = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 5.0]],
+    draw_offered_by: "first"
+  )
+  hash_with = game_with.to_h
+  raise "to_h should include draw_offered_by" unless hash_with["draw_offered_by"] == "first"
+
+  # Without draw offer
+  game_without = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
+  )
+  hash_without = game_without.to_h
+  raise "to_h should not include draw_offered_by when nil" if hash_without.key?("draw_offered_by")
+end
+
+run_test("Game equality considers draw_offered_by") do
+  game1 = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 5.0]],
+    draw_offered_by: "first"
+  )
+
+  game2 = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 5.0]],
+    draw_offered_by: "first"
+  )
+
+  game3 = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 5.0]],
+    draw_offered_by: "second"
+  )
+
+  game4 = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    moves: [["e2-e4", 5.0]]
+  )
+
+  raise "Games with same draw_offered_by should be equal" unless game1 == game2
+  raise "Games with different draw_offered_by should not be equal" if game1 == game3
+  raise "Game with draw offer should not equal game without" if game1 == game4
+end
+
+run_test("Game inspect includes draw_offered_by when present") do
+  game_with = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    draw_offered_by: "first"
+  )
+  inspect_str = game_with.inspect
+
+  raise "inspect should include draw_offered_by" unless inspect_str.include?("draw_offered_by")
+  raise "inspect should show value" unless inspect_str.include?('"first"')
+
+  game_without = Sashite::Pcn::Game.new(
+    setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
+  )
+  inspect_str_without = game_without.inspect
+
+  raise "inspect should not include draw_offered_by when nil" if inspect_str_without.include?("draw_offered_by")
+end
+
+# ============================================================================
 # GAME TESTS
 # ============================================================================
 

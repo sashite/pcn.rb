@@ -93,7 +93,7 @@ Main class representing a complete PCN game record. All instances are immutable.
 
 ### Game Initialization
 
-#### `Game.new(setup:, moves: [], status: nil, meta: {}, sides: {})`
+#### `Game.new(setup:, moves: [], status: nil, draw_offered_by: nil, meta: {}, sides: {})`
 
 Creates a new game instance with validation.
 
@@ -102,6 +102,7 @@ Creates a new game instance with validation.
 # @param setup [String] FEEN position (required)
 # @param moves [Array<Array>] array of [PAN, seconds] tuples (optional)
 # @param status [String, nil] CGSN status (optional)
+# @param draw_offered_by [String, nil] draw offer indicator ("first", "second", or nil) (optional)
 # @param meta [Hash] metadata with symbols or strings as keys (optional)
 # @param sides [Hash] player information (optional)
 # @raise [ArgumentError] if any field is invalid
@@ -139,6 +140,14 @@ game = Sashite::Pcn::Game.new(
     }
   }
 )
+
+# Game with draw offer
+game = Sashite::Pcn::Game.new(
+  setup:           "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  moves:           [["e2-e4", 8.0], ["e7-e5", 12.0]],
+  status:          "in_progress",
+  draw_offered_by: "first" # First player has offered a draw
+)
 ```
 
 ### Game Core Data Access
@@ -175,6 +184,33 @@ game.status          # => #<Sashite::Cgsn::Status ...>
 game.status.to_s     # => "checkmate"
 game.status.inferable? # => true
 ```
+
+#### `#draw_offered_by`
+
+Returns the draw offer indicator.
+
+```ruby
+# @return [String, nil] "first", "second", or nil
+
+game.draw_offered_by # => "first"  # First player has offered a draw
+game.draw_offered_by # => nil      # No draw offer pending
+```
+
+**`draw_offered_by` field semantics:**
+
+- **`nil`** (default): No draw offer is currently pending
+- **`"first"`**: The first player has offered a draw to the second player
+- **`"second"`**: The second player has offered a draw to the first player
+
+**Independence from `status`:**
+
+The `draw_offered_by` field is completely independent of the `status` field. It records communication between players (proposal state), while `status` records the observable game state (terminal condition).
+
+**Common state transitions:**
+
+1. **Offer made**: `draw_offered_by` changes from `nil` to `"first"` or `"second"`, `status` remains `"in_progress"`
+2. **Offer accepted**: `status` transitions to `"agreement"`, `draw_offered_by` may remain set or be cleared (implementation choice)
+3. **Offer canceled/withdrawn**: `draw_offered_by` returns to `nil`, `status` remains `"in_progress"`
 
 #### `#meta`
 
@@ -377,6 +413,21 @@ finished = game.with_status("checkmate")
 resigned = game.with_status("resignation")
 ```
 
+#### `#with_draw_offered_by(player)`
+
+Returns new game with updated draw offer.
+
+```ruby
+# @param player [String, nil] "first", "second", or nil
+# @return [Game] new game instance
+
+# First player offers draw
+game_with_offer = game.with_draw_offered_by("first")
+
+# Withdraw draw offer
+game_no_offer = game.with_draw_offered_by(nil)
+```
+
 #### `#with_meta(**fields)`
 
 Returns new game with merged metadata.
@@ -386,59 +437,58 @@ Returns new game with merged metadata.
 # @return [Game] new game instance
 
 updated = game.with_meta(
-  round:    6,
-  location: "London"
+  event:  "Tournament",
+  round:  1,
+  custom: "value"
 )
 ```
 
 #### `#with_moves(moves)`
 
-Returns new game with replaced move sequence.
+Returns new game with specified move sequence.
 
 ```ruby
-# @param moves [Array<Array>] new move sequence
-# @return [Game] new game instance
+# @param moves [Array<Array>] new move sequence of [PAN, seconds] tuples
+# @return [Game] new game instance with new moves
+# @raise [ArgumentError] if move format is invalid
 
-replayed = game.with_moves([
-                             ["d2-d4", 1.0],
-                             ["d7-d5", 1.5]
-                           ])
+updated = game.with_moves([
+                            ["e2-e4", 2.0],
+                            ["e7-e5", 3.0]
+                          ])
 ```
 
 ### Game Predicates
 
 #### `#in_progress?`
 
-Checks if game is in progress.
+Checks if the game is in progress.
 
 ```ruby
-# @return [Boolean, nil] true if in progress, nil if no status
+# @return [Boolean, nil] true if in progress, false if finished, nil if indeterminate
 
-game.in_progress?  # => true (if status == "in_progress")
-                   # => false (if finished)
-                   # => nil (if no status)
+game.in_progress? # => true
 ```
 
 #### `#finished?`
 
-Checks if game is finished.
+Checks if the game is finished.
 
 ```ruby
-# @return [Boolean, nil] true if finished, nil if no status
+# @return [Boolean, nil] true if finished, false if in progress, nil if indeterminate
 
-game.finished?  # => true (if status != "in_progress")
-                # => false (if in progress)
-                # => nil (if no status)
+game.finished? # => false
 ```
 
-#### `#frozen?`
+#### `#draw_offered?`
 
-Always returns true (all games are immutable).
+Checks if a draw offer is pending.
 
 ```ruby
-# @return [Boolean] always true
+# @return [Boolean] true if a draw offer is pending
 
-game.frozen? # => true
+game.draw_offered?  # => true  (if draw_offered_by is "first" or "second")
+game.draw_offered?  # => false (if draw_offered_by is nil)
 ```
 
 ### Game Serialization
@@ -448,74 +498,154 @@ game.frozen? # => true
 Converts to hash representation.
 
 ```ruby
-# @return [Hash] hash with string keys
+# @return [Hash] hash with string keys ready for JSON serialization
 
-hash = game.to_h
+game.to_h
 # => {
-#   "setup" => "+rnbq+kbn+r/...",
-#   "moves" => [["e2-e4", 2.5], ...],
+#   "setup" => "...",
+#   "moves" => [["e2-e4", 2.5], ["e7-e5", 3.1]],
 #   "status" => "in_progress",
-#   "meta" => { "event" => "..." },
-#   "sides" => { "first" => {...}, "second" => {...} }
+#   "draw_offered_by" => "first",
+#   "meta" => {...},
+#   "sides" => {...}
 # }
+```
 
-# Note: empty optional fields are omitted
-minimal_game.to_h
-# => { "setup" => "8/8/8/8/8/8/8/8 / U/u", "moves" => [] }
+#### `#==(other)`
+
+Compares with another game.
+
+```ruby
+# @param other [Object] object to compare
+# @return [Boolean] true if equal
+
+game1 == game2 # => true if all attributes match
+```
+
+#### `#hash`
+
+Returns hash code.
+
+```ruby
+# @return [Integer] hash code
+
+game.hash # => 123456789
+```
+
+#### `#inspect`
+
+Returns debug representation.
+
+```ruby
+# @return [String] debug string
+
+game.inspect
+# => "#<Game setup=\"...\" moves=[...] status=\"in_progress\">"
 ```
 
 ---
 
 ## Class: Meta
 
-Manages game metadata with validation for standard fields and support for custom fields.
+Class representing game metadata. Supports validated standard fields and custom fields.
 
 ### Meta Standard Fields
 
-| Field | Type | Validation | Example |
-|-------|------|------------|---------|
-| `name` | String | Any non-empty string | `"Italian Game"` |
-| `event` | String | Any non-empty string | `"World Championship"` |
-| `location` | String | Any non-empty string | `"Dubai, UAE"` |
-| `round` | Integer | Must be ≥ 1 | `5` |
-| `started_at` | String | ISO 8601 datetime format | `"2025-01-27T14:00:00Z"` |
-| `href` | String | Absolute URL (http/https) | `"https://example.com/game/123"` |
+Standard fields with validation:
+
+- `name` (String): Name of the game or opening
+- `event` (String): Event name
+- `location` (String): Event location
+- `round` (Integer >= 1): Round number
+- `started_at` (String): ISO 8601 timestamp
+- `href` (String): Absolute URL (http:// or https://)
 
 ### Meta Custom Fields
 
-Any fields not in the standard list are accepted without validation:
+Custom fields are accepted without validation. Examples:
 
-```ruby
-meta = Meta.new(
-  # Standard fields (validated)
-  event:        "Tournament",
-  round:        5,
-  started_at:   "2025-01-27T14:00:00Z",
-
-  # Custom fields (not validated)
-  platform:     "lichess.org",
-  opening_eco:  "B90",
-  opening_name: "Sicilian Najdorf",
-  arbiter:      "John Smith",
-  rated:        true,
-  time_control: "5+3"
-)
-```
+- `platform`: Gaming platform
+- `opening_eco`: ECO opening code
+- `rated`: Whether the game is rated
+- Any other custom field
 
 ### Meta Access Methods
 
 #### `#[](key)`
 
-Accesses metadata value by key.
+Accesses a metadata field.
 
 ```ruby
 # @param key [Symbol, String] field key
-# @return [Object, nil] value or nil
+# @return [Object, nil] field value or nil
 
-meta[:event]       # => "World Championship"
-meta["round"]      # => 5
-meta[:custom]      # => "value" or nil
+meta[:event]    # => "World Championship"
+meta[:platform] # => "lichess.org"
 ```
+
+#### `#key?(key)`
+
+Checks if a field exists.
+
+```ruby
+# @param key [Symbol, String] field key
+# @return [Boolean] true if field exists
+
+meta.key?(:event)    # => true
+meta.key?(:unknown)  # => false
+```
+
+### Meta Iteration & Collection
+
+#### `#each`
+
+Iterates over all fields.
+
+```ruby
+# @yield [key, value] passes each key-value pair
+# @return [Enumerator] if no block given
+
+meta.each do |key, value|
+  puts "#{key}: #{value}"
+end
+```
+
+#### `#keys`
+
+Returns all keys.
+
+```ruby
+# @return [Array<Symbol>] array of keys
+
+meta.keys # => [:event, :round, :started_at]
+```
+
+#### `#values`
+
+Returns all values.
+
+```ruby
+# @return [Array] array of values
+
+meta.values # => ["World Championship", 5, "2025-01-27T14:00:00Z"]
+```
+
+#### `#to_h`
+
+Converts to hash (omits nil fields).
+
+```ruby
+# @return [Hash] hash with symbol keys
+
+meta.to_h
+# => {
+#   event: "World Championship",
+#   round: 5,
+#   started_at: "2025-01-27T14:00:00Z"
+# }
+```
+
+### Meta Comparison & Equality
 
 #### `#empty?`
 
@@ -528,67 +658,9 @@ meta.empty? # => false
 Meta.new.empty? # => true
 ```
 
-#### `#key?(key)`
-
-Checks if field exists.
-
-```ruby
-# @param key [Symbol, String] field key
-# @return [Boolean] true if field exists
-
-meta.key?(:event)     # => true
-meta.key?("round")    # => true
-meta.key?(:missing)   # => false
-```
-
-#### `#keys`
-
-Returns all field keys.
-
-```ruby
-# @return [Array<Symbol>] array of keys
-
-meta.keys # => [:event, :round, :started_at, :platform]
-```
-
-### Meta Iteration & Collection
-
-#### `#each(&block)`
-
-Iterates over fields.
-
-```ruby
-# @yield [key, value] yields each field
-# @return [Enumerator] if no block given
-
-meta.each do |key, value|
-  puts "#{key}: #{value}"
-end
-
-# With Enumerable methods
-meta.each.select { |k, v| v.is_a?(String) }
-```
-
-#### `#to_h`
-
-Converts to hash.
-
-```ruby
-# @return [Hash] hash with all fields
-
-meta.to_h
-# => {
-#   event: "Tournament",
-#   round: 5,
-#   platform: "lichess.org"
-# }
-```
-
-### Meta Comparison & Equality
-
 #### `#==(other)`
 
-Compares with another Meta object.
+Compares with other metadata.
 
 ```ruby
 # @param other [Object] object to compare
@@ -597,165 +669,100 @@ Compares with another Meta object.
 meta1 == meta2 # => true if all fields match
 ```
 
-#### `#hash`
-
-Returns hash code.
-
-```ruby
-# @return [Integer] hash code for collections
-
-meta.hash # => 123456789
-```
-
-#### `#inspect`
-
-Returns debug representation.
-
-```ruby
-# @return [String] debug string
-
-meta.inspect
-# => "#<Meta event=\"Tournament\" round=5>"
-```
-
 ---
 
 ## Class: Sides
 
-Manages player information for both sides of the game.
+Class representing information for both players.
 
 ### Sides Player Access
 
 #### `#first`
 
-Returns first player.
+Returns the first player.
 
 ```ruby
-# @return [Player] first player object
+# @return [Player, nil] player object or nil
 
-player = sides.first
-player.name # => "Magnus Carlsen"
+sides.first # => #<Player ...>
 ```
 
 #### `#second`
 
-Returns second player.
+Returns the second player.
 
 ```ruby
-# @return [Player] second player object
+# @return [Player, nil] player object or nil
 
-player = sides.second
-player.name # => "Hikaru Nakamura"
-```
-
-#### `#player(side)`
-
-Returns player by side name.
-
-```ruby
-# @param side [Symbol, String] :first or :second
-# @return [Player, nil] player or nil
-
-sides.player(:first)   # => #<Player ...>
-sides.player("second") # => #<Player ...>
-sides.player(:invalid) # => nil
-```
-
-#### `#has_player?(side)`
-
-Checks if side has player data.
-
-```ruby
-# @param side [Symbol, String] :first or :second
-# @return [Boolean] true if player has data
-
-sides.has_player?(:first)   # => true
-sides.has_player?(:second)  # => false (if empty)
+sides.second # => #<Player ...>
 ```
 
 ### Sides Indexed Access
 
 #### `#[](index)`
 
-Accesses player by index.
+Accesses player by index (0 = first, 1 = second).
 
 ```ruby
 # @param index [Integer] 0 or 1
-# @return [Player, nil] player or nil
+# @return [Player, nil] player object or nil
 
-sides[0]  # => first player
-sides[1]  # => second player
-sides[2]  # => nil
+sides[0] # => first player
+sides[1] # => second player
 ```
 
 ### Sides Batch Operations
 
 #### `#names`
 
-Returns both players' names.
+Returns names of both players.
 
 ```ruby
-# @return [Array<String>] [first_name, second_name]
+# @return [Array<String, nil>] array of names
 
-sides.names  # => ["Magnus Carlsen", "Hikaru Nakamura"]
-             # => [nil, "Anonymous"] (if first empty)
+sides.names # => ["Carlsen", "Nakamura"]
 ```
 
 #### `#elos`
 
-Returns both players' Elo ratings.
+Returns Elo ratings of both players.
 
 ```ruby
-# @return [Array<Integer>] [first_elo, second_elo]
+# @return [Array<Integer, nil>] array of Elos
 
-sides.elos  # => [2830, 2794]
-            # => [nil, 2000] (if first has no Elo)
+sides.elos # => [2830, 2794]
 ```
 
 #### `#styles`
 
-Returns both players' styles.
+Returns styles of both players.
 
 ```ruby
-# @return [Array<String>] [first_style, second_style]
+# @return [Array<String, nil>] array of SNN styles
 
-sides.styles  # => ["CHESS", "chess"]
-              # => [nil, "shogi"] (if first has no style)
-```
-
-#### `#time_budgets`
-
-Returns both players' initial time budgets.
-
-```ruby
-# @return [Array<Integer>] [first_seconds, second_seconds]
-
-sides.time_budgets  # => [300, 300] (5 minutes each)
-                    # => [7200, nil] (first has 2 hours, second unlimited)
+sides.styles # => ["CHESS", "chess"]
 ```
 
 ### Sides Time Control Analysis
 
 #### `#symmetric_time_control?`
 
-Checks if both players have identical time control.
+Checks if both players have the same time control.
 
 ```ruby
-# @return [Boolean] true if periods match exactly
+# @return [Boolean] true if periods are identical
 
-sides.symmetric_time_control? # => true (same periods)
-                                # => false (different)
+sides.symmetric_time_control? # => true
 ```
 
-#### `#both_have_time_control?`
+#### `#mixed_time_control?`
 
-Checks if both players have time control defined.
+Checks if players have different time controls.
 
 ```ruby
-# @return [Boolean] true if both have periods
+# @return [Boolean] true if one player has periods and the other doesn't
 
-sides.both_have_time_control? # => true
-                                # => false (if one missing)
+sides.mixed_time_control? # => false
 ```
 
 #### `#unlimited_game?`
@@ -763,139 +770,73 @@ sides.both_have_time_control? # => true
 Checks if neither player has time control.
 
 ```ruby
-# @return [Boolean] true if both have unlimited time
+# @return [Boolean] true if no periods defined
 
-sides.unlimited_game?  # => true (casual game)
-                       # => false (if any has time control)
-```
-
-#### `#mixed_time_control?`
-
-Checks if one player has time control and the other doesn't.
-
-```ruby
-# @return [Boolean] true if mixed
-
-sides.mixed_time_control? # => true (handicap game)
-                            # => false (both or neither)
-```
-
-#### `#time_control_description`
-
-Returns human-readable time control description.
-
-```ruby
-# @return [String] descriptive string
-
-sides.time_control_description
-# => "5+3 (symmetric)"
-# => "Classical 3 periods (symmetric)"
-# => "Mixed: first 5+3, second unlimited"
-# => "First: 90+30, Second: Byōyomi"
-# => "Unlimited time"
+sides.unlimited_game? # => false
 ```
 
 ### Sides Predicates
 
-#### `#empty?`
-
-Checks if no player information exists.
-
-```ruby
-# @return [Boolean] true if both players empty
-
-sides.empty? # => false (has players)
-Sides.new.empty? # => true
-```
-
 #### `#complete?`
 
-Checks if both players have information.
+Checks if both players are defined.
 
 ```ruby
-# @return [Boolean] true if both players have data
+# @return [Boolean] true if first and second are defined
 
-sides.complete?  # => true (both present)
-                 # => false (one or both empty)
+sides.complete? # => true
+```
+
+#### `#empty?`
+
+Checks if no players are defined.
+
+```ruby
+# @return [Boolean] true if no players defined
+
+sides.empty? # => false
 ```
 
 ### Sides Collections & Iteration
 
-#### `#each(&block)`
+#### `#each`
 
-Iterates over both players.
+Iterates over players.
 
 ```ruby
-# @yield [player] yields each player
-# @return [Enumerator] if no block
+# @yield [player] passes each player
+# @return [Enumerator] if no block given
 
 sides.each do |player|
   puts player.name
 end
-
-sides.each.with_index do |player, i|
-  puts "Player #{i + 1}: #{player.name}"
-end
-```
-
-#### `#map(&block)`
-
-Maps over both players.
-
-```ruby
-# @yield [player] yields each player
-# @return [Array] results
-
-sides.map(&:name)  # => ["Alice", "Bob"]
-sides.map(&:elo)   # => [2100, 2050]
-sides.map { |p| p.elo || 0 } # => [2100, 0]
-```
-
-#### `#to_a`
-
-Converts to array.
-
-```ruby
-# @return [Array<Player>] [first, second]
-
-players = sides.to_a
-players[0]  # => first player
-players[1]  # => second player
 ```
 
 #### `#to_h`
 
-Converts to hash (omits empty players).
+Converts to hash.
 
 ```ruby
-# @return [Hash] hash representation
+# @return [Hash] hash with first/second keys
 
 sides.to_h
 # => {
-#   first: { name: "Alice", elo: 2100, ... },
-#   second: { name: "Bob", elo: 2050, ... }
+#   first: { name: "Carlsen", ... },
+#   second: { name: "Nakamura", ... }
 # }
-
-# With one empty player
-partial_sides.to_h
-# => { first: { name: "Solo" } }
-
-# Both empty
-empty_sides.to_h
-# => {}
 ```
 
 ---
 
 ## Class: Player
 
-Represents individual player information with metadata and time control.
+Class representing a single player with their information and time control.
 
 ### Player Core Attributes
 
 #### `#name`
 
-Returns player name.
+Returns the player's name.
 
 ```ruby
 # @return [String, nil] name or nil
@@ -905,33 +846,30 @@ player.name # => "Magnus Carlsen"
 
 #### `#elo`
 
-Returns Elo rating.
+Returns the Elo rating.
 
 ```ruby
-# @return [Integer, nil] rating >= 0 or nil
+# @return [Integer, nil] Elo or nil
 
 player.elo # => 2830
 ```
 
 #### `#style`
 
-Returns playing style.
+Returns the playing style (SNN notation).
 
 ```ruby
-# @return [Sashite::Snn::Name, nil] style object or nil
+# @return [String, nil] SNN style or nil
 
-player.style      # => #<Sashite::Snn::Name ...>
-player.style.to_s # => "CHESS"
+player.style # => "CHESS"
 ```
-
-### Player Time Control
 
 #### `#periods`
 
-Returns time control periods.
+Returns the time control periods.
 
 ```ruby
-# @return [Array<Hash>] period array
+# @return [Array<Hash>, nil] array of periods or nil
 
 player.periods
 # => [
@@ -940,36 +878,21 @@ player.periods
 # ]
 ```
 
-Period structure:
-- `time`: Integer ≥ 0 (seconds, required)
-- `moves`: Integer ≥ 1 or nil (number of moves)
-- `inc`: Integer ≥ 0 (increment seconds, default: 0)
+### Player Time Control
 
 #### `#has_time_control?`
 
-Checks if player has time control.
+Checks if the player has time control.
 
 ```ruby
-# @return [Boolean] true if periods defined
+# @return [Boolean] true if periods are defined
 
-player.has_time_control?  # => true
-                          # => false (if periods nil)
-```
-
-#### `#unlimited_time?`
-
-Checks if player has unlimited time.
-
-```ruby
-# @return [Boolean] true if no time control
-
-player.unlimited_time?  # => false (has periods)
-                        # => true (no periods or [])
+player.has_time_control? # => true
 ```
 
 #### `#initial_time_budget`
 
-Calculates total initial time.
+Calculates the total initial time budget.
 
 ```ruby
 # @return [Integer, nil] total seconds or nil
@@ -1085,6 +1008,22 @@ game.add_move(["e2-e4", -5])
 # => ArgumentError: "seconds must be a non-negative number"
 ```
 
+#### draw_offered_by Errors
+
+```ruby
+Game.new(
+  setup:           "8/8/8/8/8/8/8/8 / U/u",
+  draw_offered_by: "third"
+)
+# => ArgumentError: "draw_offered_by must be nil, 'first', or 'second'"
+
+Game.new(
+  setup:           "8/8/8/8/8/8/8/8 / U/u",
+  draw_offered_by: 123
+)
+# => ArgumentError: "draw_offered_by must be a string or nil"
+```
+
 #### Metadata Errors
 
 ```ruby
@@ -1144,6 +1083,7 @@ end
 |-------|------|---------|-------------|
 | `moves` | Array<[String, Float]> | `[]` | PAN moves with seconds |
 | `status` | String or nil | `nil` | CGSN status |
+| `draw_offered_by` | String or nil | `nil` | Draw offer indicator |
 | `meta` | Hash | `{}` | Metadata fields |
 | `sides` | Hash | `{}` | Player information |
 
@@ -1156,13 +1096,21 @@ end
 ]
 ```
 
+### draw_offered_by Values
+
+```ruby
+nil        # No draw offer pending (default)
+"first"    # First player has offered a draw
+"second"   # Second player has offered a draw
+```
+
 ### Period Structure
 
 ```ruby
 {
   time:  300, # Seconds (Integer >= 0, required)
   moves: nil, # Move count (Integer >= 1 or nil)
-  inc:   3 # Increment (Integer >= 0, default: 0)
+  inc:   3    # Increment (Integer >= 0, default: 0)
 }
 ```
 
@@ -1171,9 +1119,9 @@ end
 ```ruby
 {
   name:    "Magnus Carlsen", # String (optional)
-  elo:     2830, # Integer >= 0 (optional)
-  style:   "CHESS", # SNN string (optional)
-  periods: [] # Array<Hash> (optional)
+  elo:     2830,             # Integer >= 0 (optional)
+  style:   "CHESS",          # SNN string (optional)
+  periods: []                # Array<Hash> (optional)
 }
 ```
 
@@ -1182,12 +1130,12 @@ end
 Standard fields (validated):
 ```ruby
 {
-  name:       "Italian Game", # String
-  event:      "World Championship", # String
-  location:   "Dubai", # String
-  round:      5, # Integer >= 1
+  name:       "Italian Game",         # String
+  event:      "World Championship",   # String
+  location:   "Dubai",                # String
+  round:      5,                      # Integer >= 1
   started_at: "2025-01-27T14:00:00Z", # ISO 8601
-  href:       "https://example.com" # Absolute URL
+  href:       "https://example.com"   # Absolute URL
 }
 ```
 
@@ -1222,6 +1170,9 @@ game = game.with_meta(
 # Play moves
 game = game.add_move(["e2-e4", 2.3])
 game = game.add_move(["e7-e5", 3.1])
+
+# Offer draw
+game = game.with_draw_offered_by("first")
 
 # Finish
 game = game.with_status("checkmate")
@@ -1275,6 +1226,22 @@ game = game.with_meta(
   round:      game.meta[:round] + 1,
   updated_at: Time.now.iso8601
 )
+```
+
+### Managing Draw Offers
+
+```ruby
+# Offer a draw
+game = game.with_draw_offered_by("first")
+
+# Check if an offer is pending
+puts "Draw offer from: #{game.draw_offered_by}" if game.draw_offered?
+
+# Accept a draw
+game = game.with_status("agreement")
+
+# Cancel a draw (withdraw the offer)
+game = game.with_draw_offered_by(nil)
 ```
 
 ### Analyzing Players
@@ -1343,7 +1310,7 @@ response = http.request(request)
 - **PCN Specification**: v1.0.0
 - **Ruby Required**: >= 3.2.0
 - **Dependencies**:
-  - `sashite-pan` ~> 1.1
+  - `sashite-pan` ~> 4.0
   - `sashite-feen` ~> 0.3
   - `sashite-snn` ~> 3.1
   - `sashite-cgsn` ~> 0.1
@@ -1356,3 +1323,4 @@ response = http.request(request)
 - [RubyDoc Documentation](https://rubydoc.info/github/sashite/pcn.rb/main)
 - [PCN Specification](https://sashite.dev/specs/pcn/1.0.0/)
 - [Examples](https://sashite.dev/specs/pcn/1.0.0/examples/)
+- [Draw Offer Examples](https://sashite.dev/specs/pcn/1.0.0/examples/draw-offers/)

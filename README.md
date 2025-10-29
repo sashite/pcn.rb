@@ -15,6 +15,7 @@
 - [API Documentation](#api-documentation)
 - [Format Specifications](#format-specifications)
 - [Time Control Examples](#time-control-examples)
+- [Draw Offers](#draw-offers)
 - [Error Handling](#error-handling)
 - [Complete Examples](#complete-examples)
 - [JSON Interoperability](#json-interoperability)
@@ -24,6 +25,7 @@
 PCN (Portable Chess Notation) is a comprehensive, JSON-based format for representing complete chess game records across variants. This Ruby implementation provides:
 
 - **Complete game records** with positions, moves, time tracking, and metadata
+- **Draw offer tracking** for recording draw proposals between players
 - **Time control support** for Fischer, Classical, Byōyomi, Canadian, and more
 - **Rule-agnostic design** supporting all abstract strategy board games
 - **Immutable objects** with functional transformations
@@ -80,11 +82,16 @@ game.status         # => CGSN status object
 # Transform immutably
 new_game = game.add_move(["g1-f3", 1.8])
 final_game = new_game.with_status("checkmate")
+
+# Handle draw offers
+game_with_offer = game.with_draw_offered_by("first")
+game.draw_offered?  # => true
+game.draw_offered_by # => "first"
 ```
 
 ## API Documentation
 
-For complete API documentation, see [API.md](https://github.com/sashite/pcn.rb/blob/v0.4.1/API.md).
+For complete API documentation, see [API Reference](https://rubydoc.info/github/sashite/pcn.rb/main/file/API.md).
 
 The API documentation includes:
 - All classes and methods
@@ -93,6 +100,7 @@ The API documentation includes:
 - Code examples for every method
 - Common usage patterns
 - Time control formats
+- Draw offer handling
 - Error handling
 
 ## Format Specifications
@@ -102,7 +110,7 @@ The API documentation includes:
 ```ruby
 # Standard chess starting position
 "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
-# └─ board ─────────────────────────────────────────────────────┘ └┘ └─┘
+# └─ board ──────────────────────────────────────────────┘ └┘ └─┘
 #                                                               turn styles
 
 # Empty board
@@ -150,8 +158,10 @@ The API documentation includes:
 # Explicit only (must be declared)
 "resignation"    # Player resigned
 "time_limit"     # Time expired
-"agreement"      # Mutual agreement
+"agreement"      # Mutual agreement (draw)
 "illegal_move"   # Invalid move played
+"repetition"     # Draw by repetition
+"move_limit"     # Move limit reached
 ```
 
 ### SNN (Styles)
@@ -232,6 +242,74 @@ periods: []      # Empty array
 periods: nil     # Or omit entirely
 ```
 
+## Draw Offers
+
+PCN supports tracking draw offers between players using the `draw_offered_by` field.
+
+### Basic Usage
+
+```ruby
+# Offer a draw
+game = game.with_draw_offered_by("first")  # First player offers
+
+# Check if draw offered
+game.draw_offered?       # => true
+game.draw_offered_by     # => "first"
+
+# Accept the draw
+game = game.with_status("agreement")
+
+# Decline/withdraw draw offer
+game = game.with_draw_offered_by(nil)
+```
+
+### Draw Offer Values
+
+```ruby
+nil        # No draw offer pending (default)
+"first"    # First player has offered a draw
+"second"   # Second player has offered a draw
+```
+
+### Example: Draw Offer During Game
+
+```ruby
+# Game in progress with draw offer
+game = Sashite::Pcn.parse({
+  "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  "moves" => [
+    ["e2-e4", 8.0],
+    ["e7-e5", 12.0],
+    ["g1-f3", 15.0]
+  ],
+  "draw_offered_by" => "first",
+  "status" => "in_progress"
+})
+
+# First player has offered a draw after move 3
+puts "Draw offered by: #{game.draw_offered_by}"  # => "first"
+```
+
+### Example: Accepted Draw
+
+```ruby
+# Draw accepted
+game = Sashite::Pcn.parse({
+  "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  "moves" => [
+    ["e2-e4", 15.0],
+    ["e7-e5", 18.0],
+    ["g1-f3", 22.0],
+    ["b8-c6", 12.0]
+  ],
+  "draw_offered_by" => "first",
+  "status" => "agreement"
+})
+
+# First player offered, second player accepted
+puts "Game result: Draw by agreement"
+```
+
 ## Error Handling
 
 ```ruby
@@ -256,6 +334,16 @@ rescue ArgumentError => e
   puts e.message  # => "Each move must be [PAN string, seconds float] tuple"
 end
 
+# Draw offer validation
+begin
+  Sashite::Pcn::Game.new(
+    setup: "8/8/8/8/8/8/8/8 / U/u",
+    draw_offered_by: "third"  # Invalid: must be nil, "first", or "second"
+  )
+rescue ArgumentError => e
+  puts e.message  # => "draw_offered_by must be nil, 'first', or 'second'"
+end
+
 # Metadata validation
 begin
   Sashite::Pcn::Game.new(
@@ -275,6 +363,7 @@ begin
       ]
     }
   }
+  Sashite::Pcn::Game.new(setup: "8/8/8/8/8/8/8/8 / U/u", sides: sides)
 rescue ArgumentError => e
   puts e.message  # => "time must be a non-negative integer (>= 0)"
 end
@@ -353,12 +442,56 @@ puts "Moves played: #{game.move_count}"
 puts "White time: #{game.first_player_time}s"
 puts "Black time: #{game.second_player_time}s"
 
+# Offer a draw
+game = game.with_draw_offered_by("first")
+
 # Finish game
 if some_condition
   game = game.with_status("checkmate")
-elsif another_condition
+elsif draw_accepted?
+  game = game.with_status("agreement")
+else
   game = game.with_status("resignation")
 end
+```
+
+### Game with Draw Offer
+
+```ruby
+# Complete game with draw offer and acceptance
+game = Sashite::Pcn::Game.new(
+  meta: {
+    event: "Club Match",
+    round: 5,
+    started_at: "2025-01-27T14:00:00Z"
+  },
+  sides: {
+    first: {
+      name: "Player A",
+      elo: 2200,
+      style: "CHESS"
+    },
+    second: {
+      name: "Player B",
+      elo: 2190,
+      style: "chess"
+    }
+  },
+  setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  moves: [
+    ["e2-e4", 15.0],
+    ["e7-e5", 18.0],
+    ["g1-f3", 22.0],
+    ["b8-c6", 12.0],
+    ["d2-d4", 31.0],
+    ["e5+d4", 25.0]
+  ],
+  draw_offered_by: "first",
+  status: "agreement"
+)
+
+puts "Result: Draw by agreement"
+puts "Initiated by: #{game.draw_offered_by}"
 ```
 
 ### Complex Tournament Game
@@ -437,7 +570,41 @@ puts "Winner: #{game.status == 'resignation' ? 'First player (White)' : 'Unknown
 puts "Total moves: #{game.move_count}"
 
 # Export to JSON file
-File.write("game.json", JSON.generate(game.to_h))
+File.write("game.json", JSON.pretty_generate(game.to_h))
+```
+
+### Draw Offer Scenario
+
+```ruby
+# Game progressing with draw offer
+game = Sashite::Pcn::Game.new(
+  setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c"
+)
+
+# Play several moves
+game = game.add_move(["e2-e4", 8.0])
+game = game.add_move(["e7-e5", 12.0])
+game = game.add_move(["g1-f3", 15.0])
+game = game.add_move(["b8-c6", 5.0])
+
+# First player offers a draw
+game = game.with_draw_offered_by("first")
+
+# Check the offer
+if game.draw_offered?
+  puts "Draw offered by: #{game.draw_offered_by}"
+
+  # Second player can accept
+  if player_accepts_draw?
+    game = game.with_status("agreement")
+    puts "Draw accepted!"
+  else
+    # Or decline and continue
+    game = game.with_draw_offered_by(nil)
+    game = game.add_move(["f1-c4", 9.0])
+    puts "Draw declined, game continues"
+  end
+end
 ```
 
 ## JSON Interoperability
@@ -511,6 +678,7 @@ record.save!
 record = GameRecord.find(id)
 game = record.game
 puts game.move_count
+puts "Draw offered: #{game.draw_offered?}"
 ```
 
 ## Properties
@@ -520,13 +688,14 @@ puts game.move_count
 - **Type-safe**: Strong type checking throughout
 - **Rule-agnostic**: Independent of specific game rules
 - **JSON-native**: Direct serialization to/from JSON
-- **Comprehensive**: Complete game information including time tracking
+- **Comprehensive**: Complete game information including time tracking and draw offers
 - **Extensible**: Custom metadata and player fields supported
 
 ## Documentation
 
 - [Official PCN Specification v1.0.0](https://sashite.dev/specs/pcn/1.0.0/)
 - [PCN Examples](https://sashite.dev/specs/pcn/1.0.0/examples/)
+- [Draw Offer Examples](https://sashite.dev/specs/pcn/1.0.0/examples/draw-offers/)
 - [API Documentation](https://rubydoc.info/github/sashite/pcn.rb/main)
 - [PAN Specification](https://sashite.dev/specs/pan/) (moves)
 - [FEEN Specification](https://sashite.dev/specs/feen/) (positions)

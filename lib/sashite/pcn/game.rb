@@ -13,8 +13,8 @@ module Sashite
     # Represents a complete game record in PCN (Portable Chess Notation) format.
     #
     # A game consists of an initial position (setup), optional move sequence with time tracking,
-    # optional game status, optional metadata, and optional player information with time control.
-    # All instances are immutable - transformations return new instances.
+    # optional game status, optional draw offer tracking, optional metadata, and optional player
+    # information with time control. All instances are immutable - transformations return new instances.
     #
     # All parameters are validated at initialization time. An instance of Game
     # cannot be created with invalid data.
@@ -55,6 +55,14 @@ module Sashite
     #     ],
     #     status: "in_progress"
     #   )
+    #
+    # @example Game with draw offer
+    #   game = Game.new(
+    #     setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    #     moves: [["e2-e4", 8.0], ["e7-e5", 12.0]],
+    #     draw_offered_by: "first",
+    #     status: "in_progress"
+    #   )
     class Game
       # Error messages
       ERROR_MISSING_SETUP = "setup is required"
@@ -64,19 +72,24 @@ module Sashite
       ERROR_INVALID_SECONDS = "seconds must be a non-negative number"
       ERROR_INVALID_META = "meta must be a hash"
       ERROR_INVALID_SIDES = "sides must be a hash"
+      ERROR_INVALID_DRAW_OFFERED_BY = "draw_offered_by must be nil, 'first', or 'second'"
 
       # Status constants
       STATUS_IN_PROGRESS = "in_progress"
+
+      # Valid draw_offered_by values
+      VALID_DRAW_OFFERED_BY = [nil, "first", "second"].freeze
 
       # Create a new game instance
       #
       # @param setup [String] initial position in FEEN format (required)
       # @param moves [Array<Array>] sequence of [PAN, seconds] tuples (optional, defaults to [])
       # @param status [String, nil] game status in CGSN format (optional)
+      # @param draw_offered_by [String, nil] draw offer indicator: nil, "first", or "second" (optional)
       # @param meta [Hash] game metadata (optional)
       # @param sides [Hash] player information with time control (optional)
       # @raise [ArgumentError] if required fields are missing or invalid
-      def initialize(setup:, moves: [], status: nil, meta: {}, sides: {})
+      def initialize(setup:, moves: [], status: nil, draw_offered_by: nil, meta: {}, sides: {})
         # Validate and parse setup (required)
         raise ::ArgumentError, ERROR_MISSING_SETUP if setup.nil?
         @setup = ::Sashite::Feen.parse(setup)
@@ -87,6 +100,10 @@ module Sashite
 
         # Validate and parse status (optional)
         @status = status.nil? ? nil : ::Sashite::Cgsn.parse(status)
+
+        # Validate draw_offered_by (optional)
+        validate_draw_offered_by(draw_offered_by)
+        @draw_offered_by = draw_offered_by
 
         # Validate meta (optional)
         raise ::ArgumentError, ERROR_INVALID_META unless meta.is_a?(::Hash)
@@ -151,6 +168,17 @@ module Sashite
       #   game.status  # => #<Sashite::Cgsn::Status ...>
       def status
         @status
+      end
+
+      # Get draw offer indicator
+      #
+      # @return [String, nil] "first", "second", or nil
+      #
+      # @example
+      #   game.draw_offered_by  # => "first"
+      #   game.draw_offered_by  # => nil
+      def draw_offered_by
+        @draw_offered_by
       end
 
       # ========================================================================
@@ -221,6 +249,7 @@ module Sashite
           setup: @setup.to_s,
           moves: new_moves,
           status: @status&.to_s,
+          draw_offered_by: @draw_offered_by,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
@@ -334,6 +363,30 @@ module Sashite
           setup: @setup.to_s,
           moves: @moves,
           status: new_status,
+          draw_offered_by: @draw_offered_by,
+          meta: @meta.to_h,
+          sides: @sides.to_h
+        )
+      end
+
+      # Create new game with updated draw offer
+      #
+      # @param player [String, nil] "first", "second", or nil
+      # @return [Game] new game instance with updated draw offer
+      # @raise [ArgumentError] if player is invalid
+      #
+      # @example
+      #   # First player offers a draw
+      #   game_with_offer = game.with_draw_offered_by("first")
+      #
+      #   # Withdraw draw offer
+      #   game_no_offer = game.with_draw_offered_by(nil)
+      def with_draw_offered_by(player)
+        self.class.new(
+          setup: @setup.to_s,
+          moves: @moves,
+          status: @status&.to_s,
+          draw_offered_by: player,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
@@ -352,6 +405,7 @@ module Sashite
           setup: @setup.to_s,
           moves: @moves,
           status: @status&.to_s,
+          draw_offered_by: @draw_offered_by,
           meta: merged_meta,
           sides: @sides.to_h
         )
@@ -370,6 +424,7 @@ module Sashite
           setup: @setup.to_s,
           moves: new_moves,
           status: @status&.to_s,
+          draw_offered_by: @draw_offered_by,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
@@ -403,6 +458,17 @@ module Sashite
         !in_progress?
       end
 
+      # Check if a draw offer is pending
+      #
+      # @return [Boolean] true if a draw offer is pending
+      #
+      # @example
+      #   game.draw_offered?  # => true (if draw_offered_by is "first" or "second")
+      #   game.draw_offered?  # => false (if draw_offered_by is nil)
+      def draw_offered?
+        !@draw_offered_by.nil?
+      end
+
       # ========================================================================
       # Serialization
       # ========================================================================
@@ -417,6 +483,7 @@ module Sashite
       #   #   "setup" => "...",
       #   #   "moves" => [["e2-e4", 2.5], ["e7-e5", 3.1]],
       #   #   "status" => "in_progress",
+      #   #   "draw_offered_by" => "first",
       #   #   "meta" => {...},
       #   #   "sides" => {...}
       #   # }
@@ -428,10 +495,57 @@ module Sashite
 
         # Include optional fields if present
         result["status"] = @status.to_s if @status
+        result["draw_offered_by"] = @draw_offered_by if @draw_offered_by
         result["meta"] = @meta.to_h unless @meta.empty?
         result["sides"] = @sides.to_h unless @sides.empty?
 
         result
+      end
+
+      # Compare with another game
+      #
+      # @param other [Object] object to compare
+      # @return [Boolean] true if equal
+      #
+      # @example
+      #   game1 == game2  # => true if all attributes match
+      def ==(other)
+        return false unless other.is_a?(Game)
+
+        @setup.to_s == other.setup.to_s &&
+          @moves == other.moves &&
+          @status&.to_s == other.status&.to_s &&
+          @draw_offered_by == other.draw_offered_by &&
+          @meta == other.meta &&
+          @sides == other.sides
+      end
+
+      # Generate hash code
+      #
+      # @return [Integer] hash code for this game
+      #
+      # @example
+      #   game.hash  # => 123456789
+      def hash
+        [@setup.to_s, @moves, @status&.to_s, @draw_offered_by, @meta, @sides].hash
+      end
+
+      # Generate debug representation
+      #
+      # @return [String] debug string
+      #
+      # @example
+      #   game.inspect
+      #   # => "#<Game setup=\"...\" moves=[...] status=\"in_progress\" draw_offered_by=\"first\">"
+      def inspect
+        parts = ["setup=#{@setup.to_s.inspect}"]
+        parts << "moves=#{@moves.inspect}"
+        parts << "status=#{@status&.to_s.inspect}" if @status
+        parts << "draw_offered_by=#{@draw_offered_by.inspect}" if @draw_offered_by
+        parts << "meta=#{@meta.inspect}" unless @meta.empty?
+        parts << "sides=#{@sides.inspect}" unless @sides.empty?
+
+        "#<#{self.class.name} #{parts.join(' ')}>"
       end
 
       private
@@ -477,6 +591,16 @@ module Sashite
 
         # Return the move tuple with seconds as float
         [pan_notation, seconds.to_f].freeze
+      end
+
+      # Validate draw_offered_by field
+      #
+      # @param value [String, nil] draw offer value to validate
+      # @raise [ArgumentError] if value is invalid
+      def validate_draw_offered_by(value)
+        return if VALID_DRAW_OFFERED_BY.include?(value)
+
+        raise ::ArgumentError, ERROR_INVALID_DRAW_OFFERED_BY
       end
     end
   end
