@@ -1328,6 +1328,21 @@ run_test("Round-trip parse and serialize") do
   raise "Meta event should round-trip" unless serialized["meta"][:event] == original["meta"]["event"]
 end
 
+run_test("Round-trip with winner field") do
+  original = {
+    "setup" => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    "moves" => [["e2-e4", 2.5]],
+    "status" => "resignation",
+    "winner" => "first"
+  }
+
+  game = Sashite::Pcn.parse(original)
+  serialized = game.to_h
+
+  raise "Winner should round-trip" unless serialized["winner"] == original["winner"]
+  raise "Status should round-trip" unless serialized["status"] == original["status"]
+end
+
 puts
 puts "All PCN tests passed!"
 puts

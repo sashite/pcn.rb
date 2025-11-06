@@ -57,7 +57,8 @@ Parse un document PCN à partir d'une structure hash.
 game = Sashite::Pcn.parse({
                             "setup"  => "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
                             "moves"  => [["e2-e4", 2.5], ["e7-e5", 3.1]],
-                            "status" => "in_progress"
+                            "status" => "in_progress",
+                            "winner" => nil
                           })
 
 # À partir de JSON
@@ -93,7 +94,7 @@ Classe principale représentant un enregistrement complet de partie PCN. Toutes 
 
 ### Game Initialisation
 
-#### `Game.new(setup:, moves: [], status: nil, draw_offered_by: nil, meta: {}, sides: {})`
+#### `Game.new(setup:, moves: [], status: nil, draw_offered_by: nil, winner: nil, meta: {}, sides: {})`
 
 Crée une nouvelle instance de partie avec validation.
 
@@ -103,6 +104,7 @@ Crée une nouvelle instance de partie avec validation.
 # @param moves [Array<Array>] tableau de tuples [PAN, secondes] (optionnel)
 # @param status [String, nil] statut CGSN (optionnel)
 # @param draw_offered_by [String, nil] proposition de nulle ("first", "second", ou nil) (optionnel)
+# @param winner [String, nil] résultat compétitif ("first", "second", "none", ou nil) (optionnel)
 # @param meta [Hash] métadonnées avec symboles ou strings comme clés (optionnel)
 # @param sides [Hash] informations sur les joueurs (optionnel)
 # @raise [ArgumentError] si un champ est invalide
@@ -120,6 +122,7 @@ game = Sashite::Pcn::Game.new(
     ["c7-c5", 3.1]
   ],
   status: "in_progress",
+  winner: nil,
   meta:   {
     event:      "World Championship",
     round:      5,
@@ -146,7 +149,25 @@ game = Sashite::Pcn::Game.new(
   setup:           "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
   moves:           [["e2-e4", 8.0], ["e7-e5", 12.0]],
   status:          "in_progress",
-  draw_offered_by: "first" # Le premier joueur a proposé une nulle
+  draw_offered_by: "first", # Le premier joueur a proposé une nulle
+  winner:          nil
+)
+
+# Partie terminée avec un gagnant
+game = Sashite::Pcn::Game.new(
+  setup:  "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  moves:  [["e2-e4", 8.0], ["e7-e5", 12.0], ["g1-f3", 15.0]],
+  status: "resignation",
+  winner: "first" # Le premier joueur a gagné (le second a abandonné)
+)
+
+# Nulle par accord mutuel
+game = Sashite::Pcn::Game.new(
+  setup:           "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  moves:           [["e2-e4", 8.0], ["e7-e5", 12.0]],
+  status:          "agreement",
+  draw_offered_by: "first",
+  winner:          "none" # Pas de gagnant (nulle)
 )
 ```
 
@@ -202,15 +223,67 @@ game.draw_offered_by # => nil      # Aucune proposition de nulle en attente
 - **`"first"`** : Le premier joueur a proposé une nulle au second joueur
 - **`"second"`** : Le second joueur a proposé une nulle au premier joueur
 
-**Indépendance avec `status` :**
+**Indépendance avec `status` et `winner` :**
 
-Le champ `draw_offered_by` est complètement indépendant du champ `status`. Il enregistre la communication entre les joueurs (état de proposition), tandis que `status` enregistre l'état observable de la partie (condition terminale).
+Le champ `draw_offered_by` est complètement indépendant des champs `status` et `winner`. Il enregistre la communication entre les joueurs (état de proposition), tandis que `status` enregistre l'état observable de la partie (condition terminale) et `winner` enregistre le résultat compétitif.
 
 **Transitions d'état courantes :**
 
-1. **Proposition faite** : `draw_offered_by` passe de `nil` à `"first"` ou `"second"`, `status` reste `"in_progress"`
-2. **Proposition acceptée** : `status` passe à `"agreement"`, `draw_offered_by` peut rester défini ou être effacé (choix d'implémentation)
-3. **Proposition annulée/retirée** : `draw_offered_by` retourne à `nil`, `status` reste `"in_progress"`
+1. **Proposition faite** : `draw_offered_by` passe de `nil` à `"first"` ou `"second"`, `status` reste `"in_progress"`, `winner` reste `nil`
+2. **Proposition acceptée** : `status` passe à `"agreement"`, `winner` devient `"none"`, `draw_offered_by` peut rester défini ou être effacé (choix d'implémentation)
+3. **Proposition annulée/retirée** : `draw_offered_by` retourne à `nil`, `status` reste `"in_progress"`, `winner` reste `nil`
+
+#### `#winner`
+
+Retourne le résultat compétitif de la partie.
+
+```ruby
+# @return [String, nil] "first", "second", "none", ou nil
+
+game.winner # => "first"   # Le premier joueur a gagné
+game.winner # => "second"  # Le second joueur a gagné
+game.winner # => "none"    # Nulle (pas de gagnant)
+game.winner # => nil       # Résultat non déterminé ou partie en cours
+```
+
+**Sémantique du champ `winner` :**
+
+- **`nil`** (défaut) : Résultat non déterminé ou partie en cours
+- **`"first"`** : Le premier joueur a gagné la partie
+- **`"second"`** : Le second joueur a gagné la partie
+- **`"none"`** : Nulle (pas de gagnant)
+
+**Objectif et avantages :**
+
+Le champ `winner` enregistre explicitement le résultat compétitif, éliminant toute ambiguïté dans l'interprétation du statut de la partie. Il est particulièrement utile pour clarifier les statuts ambigus :
+
+**Désambiguïsation des statuts ambigus :**
+
+- **Abandon** : `status: "resignation", winner: "first"` clarifie que le second joueur a abandonné
+- **Temps écoulé** : `status: "time_limit", winner: "second"` clarifie que le premier joueur a perdu au temps
+- **Coup illégal** : `status: "illegal_move", winner: "first"` clarifie que le second joueur a fait un coup illégal
+- **Accord mutuel** : `status: "agreement", winner: "none"` confirme explicitement la nulle
+
+**Cohérence avec `status` :**
+
+Bien que `winner` puisse souvent être déduit de `status` et de la position, une déclaration explicite :
+- Élimine le besoin de logique d'inférence complexe
+- Prend en charge les variantes avec différentes interprétations de règles
+- Fournit une clarté immédiate pour l'analyse et l'affichage
+- Permet des substitutions dans des cas spéciaux ou des règles de tournoi
+
+**Cohérence recommandée :**
+
+| Statut | Gagnant attendu | Notes |
+|--------|-----------------|-------|
+| `"checkmate"` | `"first"` ou `"second"` | Gagnant selon qui a donné l'échec et mat |
+| `"stalemate"` | `"none"` | Généralement nulle aux échecs occidentaux |
+| `"resignation"` | `"first"` ou `"second"` | Opposé de celui qui a abandonné |
+| `"time_limit"` | `"first"` ou `"second"` | Opposé de celui qui a dépassé le temps |
+| `"repetition"` | `"none"` ou autre | Dépend des règles du jeu |
+| `"agreement"` | `"none"` | Généralement nulle par accord mutuel |
+| `"insufficient"` | `"none"` | Nulle par matériel insuffisant |
+| `"in_progress"` | `null` | Partie non terminée |
 
 #### `#meta`
 
@@ -357,16 +430,6 @@ game.second_player
 
 ### Game Raccourcis métadonnées
 
-#### `#started_at`
-
-Retourne le timestamp de début de partie.
-
-```ruby
-# @return [String, nil] datetime ISO 8601 ou nil
-
-game.started_at # => "2025-01-27T14:00:00Z"
-```
-
 #### `#event`
 
 Retourne le nom de l'événement.
@@ -375,16 +438,6 @@ Retourne le nom de l'événement.
 # @return [String, nil] nom de l'événement ou nil
 
 game.event # => "World Championship"
-```
-
-#### `#location`
-
-Retourne le lieu de l'événement.
-
-```ruby
-# @return [String, nil] lieu ou nil
-
-game.location # => "Dubai, UAE"
 ```
 
 #### `#round`
@@ -397,65 +450,114 @@ Retourne le numéro de ronde.
 game.round # => 5
 ```
 
-### Game Transformations
+#### `#location`
 
-Toutes les transformations retournent de nouvelles instances (pattern immuable).
-
-#### `#with_status(status)`
-
-Retourne une nouvelle partie avec le statut mis à jour.
+Retourne le lieu.
 
 ```ruby
-# @param status [String, nil] nouveau statut CGSN
-# @return [Game] nouvelle instance de partie
+# @return [String, nil] lieu ou nil
 
-finished = game.with_status("checkmate")
-resigned = game.with_status("resignation")
+game.location # => "Dubai"
+```
+
+#### `#started_at`
+
+Retourne la date/heure de début.
+
+```ruby
+# @return [String, nil] date/heure ISO 8601 ou nil
+
+game.started_at # => "2025-01-27T14:00:00Z"
+```
+
+#### `#href`
+
+Retourne l'URL de référence.
+
+```ruby
+# @return [String, nil] URL ou nil
+
+game.href # => "https://example.com/game/123"
+```
+
+### Game Transformations
+
+#### `#with_status(new_status)`
+
+Retourne une nouvelle partie avec le statut mis à jour (immuable).
+
+```ruby
+# @param new_status [String, nil] nouvelle valeur de statut
+# @return [Game] nouvelle instance de partie avec le statut mis à jour
+# @raise [ArgumentError] si le statut est invalide
+
+# Exemple
+updated = game.with_status("resignation")
 ```
 
 #### `#with_draw_offered_by(player)`
 
-Retourne une nouvelle partie avec la proposition de nulle mise à jour.
+Retourne une nouvelle partie avec la proposition de nulle mise à jour (immuable).
 
 ```ruby
 # @param player [String, nil] "first", "second", ou nil
-# @return [Game] nouvelle instance de partie
+# @return [Game] nouvelle instance de partie avec la proposition de nulle mise à jour
+# @raise [ArgumentError] si le joueur est invalide
 
-# Proposition de nulle du premier joueur
+# Exemple
+# Le premier joueur propose une nulle
 game_with_offer = game.with_draw_offered_by("first")
 
-# Retrait de la proposition de nulle
+# Retirer la proposition de nulle
 game_no_offer = game.with_draw_offered_by(nil)
 ```
 
-#### `#with_meta(**fields)`
+#### `#with_winner(new_winner)`
 
-Retourne une nouvelle partie avec les métadonnées fusionnées.
+Retourne une nouvelle partie avec le gagnant mis à jour (immuable).
 
 ```ruby
-# @param fields [Hash] champs de métadonnées à fusionner
-# @return [Game] nouvelle instance de partie
+# @param new_winner [String, nil] "first", "second", "none", ou nil
+# @return [Game] nouvelle instance de partie avec le gagnant mis à jour
+# @raise [ArgumentError] si le gagnant est invalide
 
-updated = game.with_meta(
-  event:  "Tournament",
-  round:  1,
-  custom: "value"
-)
+# Exemples
+# Le premier joueur gagne
+game_first_wins = game.with_winner("first")
+
+# Le second joueur gagne
+game_second_wins = game.with_winner("second")
+
+# Nulle (pas de gagnant)
+game_draw = game.with_winner("none")
+
+# Effacer le gagnant (partie en cours)
+game_in_progress = game.with_winner(nil)
 ```
 
-#### `#with_moves(moves)`
+#### `#with_meta(**new_meta)`
 
-Retourne une nouvelle partie avec une séquence de coups spécifiée.
+Retourne une nouvelle partie avec les métadonnées mises à jour (immuable).
 
 ```ruby
-# @param moves [Array<Array>] nouvelle séquence de tuples [PAN, secondes]
-# @return [Game] nouvelle instance de partie avec les nouveaux coups
-# @raise [ArgumentError] si le format des coups est invalide
+# @param new_meta [Hash] métadonnées à fusionner
+# @return [Game] nouvelle instance de partie avec les métadonnées mises à jour
 
-updated = game.with_moves([
-                            ["e2-e4", 2.0],
-                            ["e7-e5", 3.0]
-                          ])
+# Exemple
+updated = game.with_meta(event: "Casual Game", round: 1)
+```
+
+#### `#with_moves(new_moves)`
+
+Retourne une nouvelle partie avec la séquence de coups spécifiée (immuable).
+
+```ruby
+# @param new_moves [Array<Array>] nouvelle séquence de coups de tuples [PAN, secondes]
+# @return [Game] nouvelle instance de partie avec les nouveaux coups
+# @raise [ArgumentError] si le format du coup est invalide
+
+# Exemple
+updated = game.with_moves([["e2-e4", 2.0], ["e7-e5", 3.0]])
 ```
 
 ### Game Prédicats
@@ -467,6 +569,7 @@ Vérifie si la partie est en cours.
 ```ruby
 # @return [Boolean, nil] true si en cours, false si terminée, nil si indéterminé
 
+# Exemple
 game.in_progress? # => true
 ```
 
@@ -477,6 +580,7 @@ Vérifie si la partie est terminée.
 ```ruby
 # @return [Boolean, nil] true si terminée, false si en cours, nil si indéterminé
 
+# Exemple
 game.finished? # => false
 ```
 
@@ -485,10 +589,48 @@ game.finished? # => false
 Vérifie si une proposition de nulle est en attente.
 
 ```ruby
-# @return [Boolean] true si une proposition est en attente
+# @return [Boolean] true si une proposition de nulle est en attente
 
-game.draw_offered?  # => true  (si draw_offered_by est "first" ou "second")
+# Exemple
+game.draw_offered?  # => true (si draw_offered_by est "first" ou "second")
 game.draw_offered?  # => false (si draw_offered_by est nil)
+```
+
+#### `#has_winner?`
+
+Vérifie si un gagnant a été déterminé.
+
+```ruby
+# @return [Boolean] true si le gagnant est déterminé (first, second, ou none)
+
+# Exemple
+game.has_winner?  # => true (si winner est "first", "second", ou "none")
+game.has_winner?  # => false (si winner est nil)
+```
+
+#### `#decisive?`
+
+Vérifie si la partie a eu un résultat décisif (pas une nulle).
+
+```ruby
+# @return [Boolean, nil] true si décisif (first ou second a gagné), false si nulle, nil si pas de gagnant
+
+# Exemple
+game.decisive?  # => true (si winner est "first" ou "second")
+game.decisive?  # => false (si winner est "none")
+game.decisive?  # => nil (si winner est nil)
+```
+
+#### `#drawn?`
+
+Vérifie si la partie s'est terminée par une nulle.
+
+```ruby
+# @return [Boolean] true si winner est "none" (nulle)
+
+# Exemple
+game.drawn?  # => true (si winner est "none")
+game.drawn?  # => false (si winner est nil, "first", ou "second")
 ```
 
 ### Game Sérialisation
@@ -500,15 +642,32 @@ Convertit en représentation hash.
 ```ruby
 # @return [Hash] hash avec des clés string prêt pour la sérialisation JSON
 
+# Exemple
 game.to_h
 # => {
 #   "setup" => "...",
 #   "moves" => [["e2-e4", 2.5], ["e7-e5", 3.1]],
 #   "status" => "in_progress",
 #   "draw_offered_by" => "first",
+#   "winner" => nil,
 #   "meta" => {...},
 #   "sides" => {...}
 # }
+```
+
+#### `#to_json(*args)`
+
+Convertit en chaîne JSON.
+
+```ruby
+# @return [String] représentation JSON
+
+# Exemple
+game.to_json
+# => '{"setup":"...","moves":[["e2-e4",2.5],["e7-e5",3.1]],...}'
+
+require "json"
+JSON.pretty_generate(game.to_h)
 ```
 
 #### `#==(other)`
@@ -517,93 +676,117 @@ Compare avec une autre partie.
 
 ```ruby
 # @param other [Object] objet à comparer
-# @return [Boolean] true si égaux
+# @return [Boolean] true si égal
 
+# Exemple
 game1 == game2 # => true si tous les attributs correspondent
 ```
 
 #### `#hash`
 
-Retourne le code de hachage.
+Génère un code de hachage.
 
 ```ruby
-# @return [Integer] code de hachage
+# @return [Integer] code de hachage pour cette partie
 
+# Exemple
 game.hash # => 123456789
 ```
 
 #### `#inspect`
 
-Retourne une représentation de débogage.
+Génère une représentation de débogage.
 
 ```ruby
-# @return [String] string de débogage
+# @return [String] chaîne de débogage
 
+# Exemple
 game.inspect
-# => "#<Game setup=\"...\" moves=[...] status=\"in_progress\">"
+# => "#<Game setup=\"...\" moves=[...] status=\"in_progress\" draw_offered_by=\"first\" winner=nil>"
 ```
 
 ---
 
 ## Classe: Meta
 
-Classe représentant les métadonnées de la partie. Supporte les champs standards validés et les champs personnalisés.
+Représente les métadonnées de la partie avec support pour les champs standards et personnalisés.
 
 ### Meta Champs standards
 
 Champs standards avec validation :
 
-- `name` (String) : Nom de la partie ou de l'ouverture
-- `event` (String) : Nom de l'événement
-- `location` (String) : Lieu de l'événement
-- `round` (Integer >= 1) : Numéro de ronde
-- `started_at` (String) : Timestamp ISO 8601
-- `href` (String) : URL absolue (http:// ou https://)
+```ruby
+meta = Sashite::Pcn::Game::Meta.new(
+  name:       "Italian Game",         # String
+  event:      "World Championship",   # String
+  location:   "Dubai",                # String
+  round:      5,                      # Integer >= 1
+  started_at: "2025-01-27T14:00:00Z", # ISO 8601
+  href:       "https://example.com"   # URL absolue
+)
+```
 
 ### Meta Champs personnalisés
 
-Les champs personnalisés sont acceptés sans validation. Exemples :
+Les champs personnalisés passent sans validation :
 
-- `platform` : Plateforme de jeu
-- `opening_eco` : Code ECO d'ouverture
-- `rated` : Partie classée ou non
-- Tout autre champ personnalisé
+```ruby
+meta = Sashite::Pcn::Game::Meta.new(
+  platform:    "lichess.org",
+  opening_eco: "B90",
+  rated:       true,
+  arbiter:     "John Smith"
+)
+```
 
 ### Meta Méthodes d'accès
 
 #### `#[](key)`
 
-Accède à un champ de métadonnées.
+Accède au champ par clé symbole ou string.
 
 ```ruby
-# @param key [Symbol, String] clé du champ
+# @param key [Symbol, String] nom du champ
 # @return [Object, nil] valeur du champ ou nil
 
-meta[:event]    # => "World Championship"
-meta[:platform] # => "lichess.org"
+meta[:event]   # => "World Championship"
+meta["event"]  # => "World Championship"
+```
+
+#### `#fetch(key, default = nil)`
+
+Récupère le champ avec une valeur par défaut optionnelle.
+
+```ruby
+# @param key [Symbol, String] nom du champ
+# @param default [Object] valeur par défaut
+# @return [Object] valeur du champ ou valeur par défaut
+
+meta.fetch(:event)           # => "World Championship"
+meta.fetch(:missing, "N/A")  # => "N/A"
 ```
 
 #### `#key?(key)`
 
-Vérifie si un champ existe.
+Vérifie si le champ existe.
 
 ```ruby
-# @param key [Symbol, String] clé du champ
+# @param key [Symbol, String] nom du champ
 # @return [Boolean] true si le champ existe
 
-meta.key?(:event)    # => true
-meta.key?(:unknown)  # => false
+meta.key?(:event)   # => true
+meta.key?(:missing) # => false
 ```
 
 ### Meta Itération et collection
 
 #### `#each`
 
-Itère sur tous les champs.
+Itère sur les champs.
 
 ```ruby
-# @yield [key, value] passe chaque paire clé-valeur
-# @return [Enumerator] si aucun bloc donné
+# @yield [key, value] clé et valeur du champ
+# @return [Enumerator] si aucun bloc n'est fourni
 
 meta.each do |key, value|
   puts "#{key}: #{value}"
@@ -612,59 +795,58 @@ end
 
 #### `#keys`
 
-Retourne toutes les clés.
+Récupère toutes les clés de champs.
 
 ```ruby
-# @return [Array<Symbol>] tableau des clés
+# @return [Array<Symbol>] clés de champs
 
 meta.keys # => [:event, :round, :started_at]
 ```
 
 #### `#values`
 
-Retourne toutes les valeurs.
+Récupère toutes les valeurs de champs.
 
 ```ruby
-# @return [Array] tableau des valeurs
+# @return [Array<Object>] valeurs de champs
 
 meta.values # => ["World Championship", 5, "2025-01-27T14:00:00Z"]
 ```
-
-#### `#to_h`
-
-Convertit en hash (omet les champs nil).
-
-```ruby
-# @return [Hash] hash avec des clés symbole
-
-meta.to_h
-# => {
-#   event: "World Championship",
-#   round: 5,
-#   started_at: "2025-01-27T14:00:00Z"
-# }
-```
-
-### Meta Comparaison et égalité
 
 #### `#empty?`
 
 Vérifie si les métadonnées sont vides.
 
 ```ruby
-# @return [Boolean] true si aucun champ défini
+# @return [Boolean] true si aucun champ
 
 meta.empty? # => false
-Meta.new.empty? # => true
 ```
+
+#### `#to_h`
+
+Convertit en hash.
+
+```ruby
+# @return [Hash] hash avec des clés string
+
+meta.to_h
+# => {
+#   "event" => "World Championship",
+#   "round" => 5,
+#   "started_at" => "2025-01-27T14:00:00Z"
+# }
+```
+
+### Meta Comparaison et égalité
 
 #### `#==(other)`
 
-Compare avec d'autres métadonnées.
+Compare avec un autre Meta.
 
 ```ruby
 # @param other [Object] objet à comparer
-# @return [Boolean] true si égaux
+# @return [Boolean] true si égal
 
 meta1 == meta2 # => true si tous les champs correspondent
 ```
@@ -673,84 +855,101 @@ meta1 == meta2 # => true si tous les champs correspondent
 
 ## Classe: Sides
 
-Classe représentant les informations des deux joueurs.
+Représente les informations des joueurs pour les deux camps.
 
 ### Sides Accès aux joueurs
 
 #### `#first`
 
-Retourne le premier joueur.
+Récupère les informations du premier joueur.
 
 ```ruby
-# @return [Player, nil] objet joueur ou nil
+# @return [Player, nil] premier joueur ou nil
 
-sides.first # => #<Player ...>
+sides.first
+# => #<Player name="Magnus Carlsen" elo=2830 style="CHESS" ...>
 ```
 
 #### `#second`
 
-Retourne le second joueur.
+Récupère les informations du second joueur.
 
 ```ruby
-# @return [Player, nil] objet joueur ou nil
+# @return [Player, nil] second joueur ou nil
 
-sides.second # => #<Player ...>
+sides.second
+# => #<Player name="Hikaru Nakamura" elo=2794 style="chess" ...>
 ```
 
 ### Sides Accès indexé
 
 #### `#[](index)`
 
-Accède au joueur par index (0 = first, 1 = second).
+Accède au joueur par index numérique.
 
 ```ruby
-# @param index [Integer] 0 ou 1
-# @return [Player, nil] objet joueur ou nil
+# @param index [Integer] 0 pour le premier, 1 pour le second
+# @return [Player, nil] joueur ou nil
 
-sides[0] # => premier joueur
-sides[1] # => second joueur
+sides[0]  # => premier joueur
+sides[1]  # => second joueur
+sides[2]  # => nil
 ```
 
 ### Sides Opérations par lot
 
 #### `#names`
 
-Retourne les noms des deux joueurs.
+Récupère les noms des deux joueurs.
 
 ```ruby
-# @return [Array<String, nil>] tableau des noms
+# @return [Array<String, nil>] tableau de noms (peut contenir des nil)
 
-sides.names # => ["Carlsen", "Nakamura"]
+sides.names # => ["Magnus Carlsen", "Hikaru Nakamura"]
 ```
 
 #### `#elos`
 
-Retourne les classements Elo des deux joueurs.
+Récupère les classements ELO des deux joueurs.
 
 ```ruby
-# @return [Array<Integer, nil>] tableau des Elo
+# @return [Array<Integer, nil>] tableau de classements (peut contenir des nil)
 
 sides.elos # => [2830, 2794]
 ```
 
 #### `#styles`
 
-Retourne les styles des deux joueurs.
+Récupère les styles des deux joueurs.
 
 ```ruby
-# @return [Array<String, nil>] tableau des styles SNN
+# @return [Array<String, nil>] tableau de styles (peut contenir des nil)
 
 sides.styles # => ["CHESS", "chess"]
+```
+
+#### `#periods`
+
+Récupère les périodes de contrôle du temps des deux joueurs.
+
+```ruby
+# @return [Array<Array<Hash>, nil>] tableau de tableaux de périodes (peut contenir des nil)
+
+sides.periods
+# => [
+#   [{ time: 300, moves: nil, inc: 3 }],
+#   [{ time: 300, moves: nil, inc: 3 }]
+# ]
 ```
 
 ### Sides Analyse du contrôle du temps
 
 #### `#symmetric_time_control?`
 
-Vérifie si les deux joueurs ont le même contrôle du temps.
+Vérifie si les deux joueurs ont un contrôle du temps identique.
 
 ```ruby
-# @return [Boolean] true si les périodes sont identiques
+# @return [Boolean] true si les contrôles du temps sont identiques
 
 sides.symmetric_time_control? # => true
 ```
@@ -760,7 +959,7 @@ sides.symmetric_time_control? # => true
 Vérifie si les joueurs ont des contrôles du temps différents.
 
 ```ruby
-# @return [Boolean] true si un joueur a des périodes et l'autre non
+# @return [Boolean] true si les contrôles du temps diffèrent
 
 sides.mixed_time_control? # => false
 ```
@@ -770,7 +969,7 @@ sides.mixed_time_control? # => false
 Vérifie si aucun joueur n'a de contrôle du temps.
 
 ```ruby
-# @return [Boolean] true si aucune période définie
+# @return [Boolean] true si aucun contrôle du temps n'est défini
 
 sides.unlimited_game? # => false
 ```
@@ -782,7 +981,7 @@ sides.unlimited_game? # => false
 Vérifie si les deux joueurs sont définis.
 
 ```ruby
-# @return [Boolean] true si first et second sont définis
+# @return [Boolean] true si le premier et le second sont définis
 
 sides.complete? # => true
 ```
@@ -792,7 +991,7 @@ sides.complete? # => true
 Vérifie si aucun joueur n'est défini.
 
 ```ruby
-# @return [Boolean] true si aucun joueur défini
+# @return [Boolean] true si le premier et le second sont nil
 
 sides.empty? # => false
 ```
@@ -804,8 +1003,8 @@ sides.empty? # => false
 Itère sur les joueurs.
 
 ```ruby
-# @yield [player] passe chaque joueur
-# @return [Enumerator] si aucun bloc donné
+# @yield [player] instance de joueur
+# @return [Enumerator] si aucun bloc n'est fourni
 
 sides.each do |player|
   puts player.name
@@ -817,12 +1016,12 @@ end
 Convertit en hash.
 
 ```ruby
-# @return [Hash] hash avec clés first/second
+# @return [Hash] hash avec des clés string
 
 sides.to_h
 # => {
-#   first: { name: "Carlsen", ... },
-#   second: { name: "Nakamura", ... }
+#   "first" => { "name" => "...", ... },
+#   "second" => { "name" => "...", ... }
 # }
 ```
 
@@ -830,46 +1029,46 @@ sides.to_h
 
 ## Classe: Player
 
-Classe représentant un seul joueur avec ses informations et son contrôle du temps.
+Représente les informations d'un joueur individuel.
 
 ### Player Attributs principaux
 
 #### `#name`
 
-Retourne le nom du joueur.
+Récupère le nom du joueur.
 
 ```ruby
-# @return [String, nil] nom ou nil
+# @return [String, nil] nom du joueur ou nil
 
 player.name # => "Magnus Carlsen"
 ```
 
 #### `#elo`
 
-Retourne le classement Elo.
+Récupère le classement ELO du joueur.
 
 ```ruby
-# @return [Integer, nil] Elo ou nil
+# @return [Integer, nil] classement ELO ou nil
 
 player.elo # => 2830
 ```
 
 #### `#style`
 
-Retourne le style de jeu (notation SNN).
+Récupère le style du joueur.
 
 ```ruby
-# @return [String, nil] style SNN ou nil
+# @return [String, nil] chaîne de style SNN ou nil
 
 player.style # => "CHESS"
 ```
 
 #### `#periods`
 
-Retourne les périodes de contrôle du temps.
+Récupère les périodes de contrôle du temps.
 
 ```ruby
-# @return [Array<Hash>, nil] tableau de périodes ou nil
+# @return [Array<Hash>, nil] tableau de hash de périodes ou nil
 
 player.periods
 # => [
@@ -882,108 +1081,111 @@ player.periods
 
 #### `#has_time_control?`
 
-Vérifie si le joueur a un contrôle du temps.
+Vérifie si le joueur a un contrôle du temps défini.
 
 ```ruby
-# @return [Boolean] true si des périodes sont définies
+# @return [Boolean] true si periods est non vide
 
 player.has_time_control? # => true
 ```
 
 #### `#initial_time_budget`
 
-Calcule le budget temps initial total.
+Calcule le budget de temps initial total.
 
 ```ruby
 # @return [Integer, nil] secondes totales ou nil
 
-player.initial_time_budget  # => 7200 (2 heures)
-                            # => nil (si pas de périodes)
+player.initial_time_budget # => 7200 (5400 + 1800)
+```
 
-# Exemples :
-# Fischer 5+3: 300
-# Classique 90+30: 7200 (5400+1800)
-# Byōyomi 60min + 5x60s: 3900
+#### `#fischer?`
+
+Vérifie si le contrôle du temps Fischer/incrément est utilisé.
+
+```ruby
+# @return [Boolean] true si période unique avec incrément et pas de quota de coups
+
+player.fischer? # => true
+```
+
+#### `#byoyomi?`
+
+Vérifie si le contrôle du temps byōyomi est utilisé.
+
+```ruby
+# @return [Boolean] true si périodes multiples avec moves=1
+
+player.byoyomi? # => false
+```
+
+#### `#canadian?`
+
+Vérifie si le contrôle du temps canadien est utilisé.
+
+```ruby
+# @return [Boolean] true si a une période avec moves>1
+
+player.canadian? # => false
 ```
 
 ### Player Prédicats
 
-#### `#empty?`
+#### `#complete?`
 
-Vérifie si le joueur n'a aucune donnée.
+Vérifie si tous les champs sont définis.
 
 ```ruby
-# @return [Boolean] true si tous les champs sont nil
+# @return [Boolean] true si name, elo, style, et periods sont tous présents
 
-player.empty? # => false (a des données)
-Player.new.empty? # => true
+player.complete? # => true
+```
+
+#### `#anonymous?`
+
+Vérifie si le joueur n'a pas de nom.
+
+```ruby
+# @return [Boolean] true si name est nil
+
+player.anonymous? # => false
 ```
 
 ### Player Sérialisation
 
 #### `#to_h`
 
-Convertit en hash (omet les champs nil).
+Convertit en hash.
 
 ```ruby
-# @return [Hash] hash avec champs non-nil
+# @return [Hash] hash avec des clés string
 
 player.to_h
 # => {
-#   name: "Magnus Carlsen",
-#   elo: 2830,
-#   style: "CHESS",
-#   periods: [{ time: 300, moves: nil, inc: 3 }]
+#   "name" => "Magnus Carlsen",
+#   "elo" => 2830,
+#   "style" => "CHESS",
+#   "periods" => [...]
 # }
-
-# Joueur partiel
-partial.to_h
-# => { name: "Anonymous" }
-
-# Joueur vide
-empty.to_h
-# => {}
-```
-
-#### `#==(other)`
-
-Compare avec un autre joueur.
-
-```ruby
-# @param other [Object] objet à comparer
-# @return [Boolean] true si égaux
-
-player1 == player2 # => true si tous les attributs correspondent
-```
-
-#### `#hash`
-
-Retourne le code de hachage.
-
-```ruby
-# @return [Integer] code de hachage
-
-player.hash # => 987654321
-```
-
-#### `#inspect`
-
-Retourne une représentation de débogage.
-
-```ruby
-# @return [String] string de débogage
-
-player.inspect
-# => "#<Player name=\"Magnus Carlsen\" elo=2830 style=\"CHESS\" periods=[...]>"
 ```
 
 ---
 
 ## Validation et erreurs
 
-### Types d'erreurs
+### Gestion des erreurs
 
-Toutes les erreurs de validation lèvent `ArgumentError` avec des messages descriptifs.
+Toutes les erreurs de validation sont levées comme `ArgumentError` avec des messages descriptifs.
+
+```ruby
+begin
+  game = Sashite::Pcn::Game.new(setup: invalid_setup)
+rescue ArgumentError => e
+  puts "La validation a échoué : #{e.message}"
+end
+```
+
+### Scénarios d'erreurs courants
 
 #### Erreurs de setup
 
@@ -1022,6 +1224,22 @@ Game.new(
   draw_offered_by: 123
 )
 # => ArgumentError: "draw_offered_by must be a string or nil"
+```
+
+#### Erreurs de winner
+
+```ruby
+Game.new(
+  setup:  "8/8/8/8/8/8/8/8 / U/u",
+  winner: "third"
+)
+# => ArgumentError: "winner must be nil, 'first', 'second', or 'none'"
+
+Game.new(
+  setup:  "8/8/8/8/8/8/8/8 / U/u",
+  winner: 123
+)
+# => ArgumentError: "winner must be a string or nil"
 ```
 
 #### Erreurs de métadonnées
@@ -1084,6 +1302,7 @@ end
 | `moves` | Array<[String, Float]> | `[]` | Coups PAN avec secondes |
 | `status` | String ou nil | `nil` | Statut CGSN |
 | `draw_offered_by` | String ou nil | `nil` | Proposition de nulle |
+| `winner` | String ou nil | `nil` | Résultat compétitif |
 | `meta` | Hash | `{}` | Champs de métadonnées |
 | `sides` | Hash | `{}` | Informations sur les joueurs |
 
@@ -1102,6 +1321,15 @@ end
 nil        # Aucune proposition de nulle en attente (défaut)
 "first"    # Le premier joueur a proposé une nulle
 "second"   # Le second joueur a proposé une nulle
+```
+
+### Valeurs de winner
+
+```ruby
+nil        # Résultat non déterminé ou partie en cours (défaut)
+"first"    # Le premier joueur a gagné
+"second"   # Le second joueur a gagné
+"none"     # Nulle (pas de gagnant)
 ```
 
 ### Structure d'une période
@@ -1135,7 +1363,7 @@ Champs standards (validés) :
   location:   "Dubai",                 # String
   round:      5,                       # Integer >= 1
   started_at: "2025-01-27T14:00:00Z", # ISO 8601
-  href:       "https://example.com" # URL absolue
+  href:       "https://example.com"   # URL absolue
 }
 ```
 
@@ -1174,8 +1402,33 @@ game = game.add_move(["e7-e5", 3.1])
 # Proposer une nulle
 game = game.with_draw_offered_by("first")
 
-# Terminer
+# Terminer avec un résultat
+game = game.with_status("resignation")
+game = game.with_winner("first") # Le second joueur a abandonné
+```
+
+### Enregistrer les résultats de partie
+
+```ruby
+# Le premier joueur gagne par échec et mat
 game = game.with_status("checkmate")
+game = game.with_winner("first")
+
+# Le second joueur gagne au temps
+game = game.with_status("time_limit")
+game = game.with_winner("second")
+
+# Nulle par accord mutuel
+game = game.with_status("agreement")
+game = game.with_winner("none")
+
+# Nulle par pat
+game = game.with_status("stalemate")
+game = game.with_winner("none")
+
+# Le second joueur abandonne
+game = game.with_status("resignation")
+game = game.with_winner("first")
 ```
 
 ### Patterns de contrôle du temps
@@ -1228,7 +1481,7 @@ game = game.with_meta(
 )
 ```
 
-### Gérer les propositions de nulle
+### Gérer les propositions de nulle et les résultats
 
 ```ruby
 # Proposer une nulle
@@ -1239,9 +1492,21 @@ puts "Draw offer from: #{game.draw_offered_by}" if game.draw_offered?
 
 # Accepter une nulle
 game = game.with_status("agreement")
+game = game.with_winner("none")
 
 # Annuler une proposition de nulle
 game = game.with_draw_offered_by(nil)
+
+# Vérifier le résultat de la partie
+if game.has_winner?
+  if game.drawn?
+    puts "La partie s'est terminée par une nulle"
+  elsif game.winner == "first"
+    puts "Le premier joueur gagne !"
+  else
+    puts "Le second joueur gagne !"
+  end
+end
 ```
 
 ### Analyser les joueurs
@@ -1252,24 +1517,24 @@ sides = game.sides
 
 if sides.complete?
   rating_diff = sides.elos[0] - sides.elos[1]
-  puts "Rating difference: #{rating_diff}"
+  puts "Différence de classement : #{rating_diff}"
 end
 
 # Vérifier l'équité du contrôle du temps
 if sides.symmetric_time_control?
-  puts "Fair match"
+  puts "Match équitable"
 elsif sides.mixed_time_control?
-  puts "Handicap game"
+  puts "Partie avec handicap"
 elsif sides.unlimited_game?
-  puts "Casual game"
+  puts "Partie informelle"
 end
 
 # Traiter chaque joueur
 sides.each.with_index do |player, i|
-  color = i == 0 ? "White" : "Black"
-  puts "#{color}: #{player.name || 'Anonymous'}"
+  color = i == 0 ? "Blancs" : "Noirs"
+  puts "#{color} : #{player.name || 'Anonyme'}"
 
-  puts "  Time: #{player.initial_time_budget / 60} minutes" if player.has_time_control?
+  puts "  Temps : #{player.initial_time_budget / 60} minutes" if player.has_time_control?
 end
 ```
 
@@ -1300,6 +1565,51 @@ request = Net::HTTP::Post.new(uri)
 request["Content-Type"] = "application/json"
 request.body = JSON.generate(game.to_h)
 response = http.request(request)
+```
+
+### Exemple complet de partie avec gagnant
+
+```ruby
+require "sashite/pcn"
+
+# Partie complète avec toutes les fonctionnalités y compris le gagnant
+game = Sashite::Pcn::Game.new(
+  meta:   {
+    event:      "World Championship",
+    round:      5,
+    location:   "Dubai",
+    started_at: "2025-01-27T14:00:00Z"
+  },
+  sides:  {
+    first:  {
+      name:    "Magnus Carlsen",
+      elo:     2830,
+      style:   "CHESS",
+      periods: [{ time: 5400, moves: 40, inc: 0 }]
+    },
+    second: {
+      name:    "Fabiano Caruana",
+      elo:     2820,
+      style:   "chess",
+      periods: [{ time: 5400, moves: 40, inc: 0 }]
+    }
+  },
+  setup:  "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+  moves:  [
+    ["e2-e4", 32.1], ["c7-c5", 28.5],
+    ["g1-f3", 45.2], ["d7-d6", 31.0],
+    ["d2-d4", 38.9], ["c5+d4", 29.8]
+    # ... plus de coups
+  ],
+  status: "resignation",
+  winner: "first" # Magnus Carlsen gagne (Fabiano a abandonné)
+)
+
+# Afficher le résultat
+puts "Événement : #{game.event}"
+puts "Statut : #{game.status}"
+puts "Gagnant : #{game.winner == 'first' ? game.first_player.name : game.second_player.name}"
+puts "Résultat : Le premier joueur gagne par abandon"
 ```
 
 ---

@@ -13,8 +13,9 @@ module Sashite
     # Represents a complete game record in PCN (Portable Chess Notation) format.
     #
     # A game consists of an initial position (setup), optional move sequence with time tracking,
-    # optional game status, optional draw offer tracking, optional metadata, and optional player
-    # information with time control. All instances are immutable - transformations return new instances.
+    # optional game status, optional draw offer tracking, optional winner declaration, optional
+    # metadata, and optional player information with time control. All instances are immutable -
+    # transformations return new instances.
     #
     # All parameters are validated at initialization time. An instance of Game
     # cannot be created with invalid data.
@@ -63,6 +64,14 @@ module Sashite
     #     draw_offered_by: "first",
     #     status: "in_progress"
     #   )
+    #
+    # @example Game with winner
+    #   game = Game.new(
+    #     setup: "+rnbq+kbn+r/+p+p+p+p+p+p+p+p/8/8/8/8/+P+P+P+P+P+P+P+P/+RNBQ+KBN+R / C/c",
+    #     moves: [["e2-e4", 8.0], ["e7-e5", 12.0]],
+    #     status: "resignation",
+    #     winner: "first"
+    #   )
     class Game
       # Error messages
       ERROR_MISSING_SETUP = "setup is required"
@@ -73,6 +82,7 @@ module Sashite
       ERROR_INVALID_META = "meta must be a hash"
       ERROR_INVALID_SIDES = "sides must be a hash"
       ERROR_INVALID_DRAW_OFFERED_BY = "draw_offered_by must be nil, 'first', or 'second'"
+      ERROR_INVALID_WINNER = "winner must be nil, 'first', 'second', or 'none'"
 
       # Status constants
       STATUS_IN_PROGRESS = "in_progress"
@@ -80,16 +90,20 @@ module Sashite
       # Valid draw_offered_by values
       VALID_DRAW_OFFERED_BY = [nil, "first", "second"].freeze
 
+      # Valid winner values
+      VALID_WINNER = [nil, "first", "second", "none"].freeze
+
       # Create a new game instance
       #
       # @param setup [String] initial position in FEEN format (required)
       # @param moves [Array<Array>] sequence of [PAN, seconds] tuples (optional, defaults to [])
       # @param status [String, nil] game status in CGSN format (optional)
       # @param draw_offered_by [String, nil] draw offer indicator: nil, "first", or "second" (optional)
+      # @param winner [String, nil] competitive outcome: nil, "first", "second", or "none" (optional)
       # @param meta [Hash] game metadata (optional)
       # @param sides [Hash] player information with time control (optional)
       # @raise [ArgumentError] if required fields are missing or invalid
-      def initialize(setup:, moves: [], status: nil, draw_offered_by: nil, meta: {}, sides: {})
+      def initialize(setup:, moves: [], status: nil, draw_offered_by: nil, winner: nil, meta: {}, sides: {})
         # Validate and parse setup (required)
         raise ::ArgumentError, ERROR_MISSING_SETUP if setup.nil?
         @setup = ::Sashite::Feen.parse(setup)
@@ -104,6 +118,10 @@ module Sashite
         # Validate draw_offered_by (optional)
         validate_draw_offered_by(draw_offered_by)
         @draw_offered_by = draw_offered_by
+
+        # Validate winner (optional)
+        validate_winner(winner)
+        @winner = winner
 
         # Validate meta (optional)
         raise ::ArgumentError, ERROR_INVALID_META unless meta.is_a?(::Hash)
@@ -181,6 +199,19 @@ module Sashite
         @draw_offered_by
       end
 
+      # Get competitive outcome
+      #
+      # @return [String, nil] "first", "second", "none", or nil
+      #
+      # @example
+      #   game.winner  # => "first"
+      #   game.winner  # => "second"
+      #   game.winner  # => "none"
+      #   game.winner  # => nil
+      def winner
+        @winner
+      end
+
       # ========================================================================
       # Player Access
       # ========================================================================
@@ -250,76 +281,67 @@ module Sashite
           moves: new_moves,
           status: @status&.to_s,
           draw_offered_by: @draw_offered_by,
+          winner: @winner,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
       end
 
-      # Get the PAN notation from a move
+      # Get PAN notation at specified index
       #
-      # @param index [Integer] move index
+      # @param index [Integer] move index (0-based)
       # @return [String, nil] PAN notation or nil if out of bounds
       #
       # @example
       #   game.pan_at(0)  # => "e2-e4"
       def pan_at(index)
         move = @moves[index]
-        move ? move[0] : nil
+        move&.first
       end
 
-      # Get the seconds spent on a move
+      # Get seconds at specified index
       #
-      # @param index [Integer] move index
+      # @param index [Integer] move index (0-based)
       # @return [Float, nil] seconds or nil if out of bounds
       #
       # @example
       #   game.seconds_at(0)  # => 2.5
       def seconds_at(index)
         move = @moves[index]
-        move ? move[1] : nil
+        move&.last
       end
 
-      # Get total time spent by first player
+      # Calculate total time spent by first player
       #
-      # @return [Float] sum of seconds for moves at even indices
+      # @return [Float] sum of seconds at even indices
       #
       # @example
-      #   game.first_player_time  # => 125.3
+      #   game.first_player_time  # => 125.7
       def first_player_time
-        @moves.each_with_index
-              .select { |_, i| i.even? }
-              .sum { |move, _| move[1] }
+        @moves.each_with_index.sum do |move, index|
+          index.even? ? move.last : 0.0
+        end
       end
 
-      # Get total time spent by second player
+      # Calculate total time spent by second player
       #
-      # @return [Float] sum of seconds for moves at odd indices
+      # @return [Float] sum of seconds at odd indices
       #
       # @example
-      #   game.second_player_time  # => 132.7
+      #   game.second_player_time  # => 132.3
       def second_player_time
-        @moves.each_with_index
-              .select { |_, i| i.odd? }
-              .sum { |move, _| move[1] }
+        @moves.each_with_index.sum do |move, index|
+          index.odd? ? move.last : 0.0
+        end
       end
 
       # ========================================================================
       # Metadata Shortcuts
       # ========================================================================
 
-      # Get game start timestamp
+      # Get event from metadata
       #
-      # @return [String, nil] start timestamp in ISO 8601 format
-      #
-      # @example
-      #   game.started_at  # => "2025-01-27T14:00:00Z"
-      def started_at
-        @meta[:started_at]
-      end
-
-      # Get event name
-      #
-      # @return [String, nil] event name
+      # @return [String, nil] event name or nil
       #
       # @example
       #   game.event  # => "World Championship"
@@ -327,24 +349,44 @@ module Sashite
         @meta[:event]
       end
 
-      # Get event location
+      # Get round from metadata
       #
-      # @return [String, nil] location
-      #
-      # @example
-      #   game.location  # => "London"
-      def location
-        @meta[:location]
-      end
-
-      # Get round number
-      #
-      # @return [Integer, nil] round number
+      # @return [Integer, nil] round number or nil
       #
       # @example
       #   game.round  # => 5
       def round
         @meta[:round]
+      end
+
+      # Get location from metadata
+      #
+      # @return [String, nil] location or nil
+      #
+      # @example
+      #   game.location  # => "Dubai, UAE"
+      def location
+        @meta[:location]
+      end
+
+      # Get started_at from metadata
+      #
+      # @return [String, nil] ISO 8601 datetime or nil
+      #
+      # @example
+      #   game.started_at  # => "2025-01-27T14:00:00Z"
+      def started_at
+        @meta[:started_at]
+      end
+
+      # Get href from metadata
+      #
+      # @return [String, nil] URL or nil
+      #
+      # @example
+      #   game.href  # => "https://example.com/game/123"
+      def href
+        @meta[:href]
       end
 
       # ========================================================================
@@ -355,6 +397,7 @@ module Sashite
       #
       # @param new_status [String, nil] new status value
       # @return [Game] new game instance with updated status
+      # @raise [ArgumentError] if status is invalid
       #
       # @example
       #   updated = game.with_status("resignation")
@@ -364,6 +407,7 @@ module Sashite
           moves: @moves,
           status: new_status,
           draw_offered_by: @draw_offered_by,
+          winner: @winner,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
@@ -387,6 +431,37 @@ module Sashite
           moves: @moves,
           status: @status&.to_s,
           draw_offered_by: player,
+          winner: @winner,
+          meta: @meta.to_h,
+          sides: @sides.to_h
+        )
+      end
+
+      # Create new game with updated winner
+      #
+      # @param new_winner [String, nil] "first", "second", "none", or nil
+      # @return [Game] new game instance with updated winner
+      # @raise [ArgumentError] if winner is invalid
+      #
+      # @example
+      #   # First player wins
+      #   game_first_wins = game.with_winner("first")
+      #
+      #   # Second player wins
+      #   game_second_wins = game.with_winner("second")
+      #
+      #   # Draw (no winner)
+      #   game_draw = game.with_winner("none")
+      #
+      #   # Clear winner
+      #   game_in_progress = game.with_winner(nil)
+      def with_winner(new_winner)
+        self.class.new(
+          setup: @setup.to_s,
+          moves: @moves,
+          status: @status&.to_s,
+          draw_offered_by: @draw_offered_by,
+          winner: new_winner,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
@@ -406,6 +481,7 @@ module Sashite
           moves: @moves,
           status: @status&.to_s,
           draw_offered_by: @draw_offered_by,
+          winner: @winner,
           meta: merged_meta,
           sides: @sides.to_h
         )
@@ -425,6 +501,7 @@ module Sashite
           moves: new_moves,
           status: @status&.to_s,
           draw_offered_by: @draw_offered_by,
+          winner: @winner,
           meta: @meta.to_h,
           sides: @sides.to_h
         )
@@ -469,6 +546,42 @@ module Sashite
         !@draw_offered_by.nil?
       end
 
+      # Check if a winner has been determined
+      #
+      # @return [Boolean] true if winner is determined (first, second, or none)
+      #
+      # @example
+      #   game.has_winner?  # => true (if winner is "first", "second", or "none")
+      #   game.has_winner?  # => false (if winner is nil)
+      def has_winner?
+        !@winner.nil?
+      end
+
+      # Check if the game had a decisive outcome (not a draw)
+      #
+      # @return [Boolean, nil] true if decisive (first or second won), false if draw, nil if no winner
+      #
+      # @example
+      #   game.decisive?  # => true (if winner is "first" or "second")
+      #   game.decisive?  # => false (if winner is "none")
+      #   game.decisive?  # => nil (if winner is nil)
+      def decisive?
+        return nil if @winner.nil?
+
+        @winner != "none"
+      end
+
+      # Check if the game ended in a draw
+      #
+      # @return [Boolean] true if winner is "none" (draw)
+      #
+      # @example
+      #   game.drawn?  # => true (if winner is "none")
+      #   game.drawn?  # => false (if winner is nil, "first", or "second")
+      def drawn?
+        @winner == "none"
+      end
+
       # ========================================================================
       # Serialization
       # ========================================================================
@@ -484,6 +597,7 @@ module Sashite
       #   #   "moves" => [["e2-e4", 2.5], ["e7-e5", 3.1]],
       #   #   "status" => "in_progress",
       #   #   "draw_offered_by" => "first",
+      #   #   "winner" => nil,
       #   #   "meta" => {...},
       #   #   "sides" => {...}
       #   # }
@@ -496,6 +610,7 @@ module Sashite
         # Include optional fields if present
         result["status"] = @status.to_s if @status
         result["draw_offered_by"] = @draw_offered_by if @draw_offered_by
+        result["winner"] = @winner if @winner
         result["meta"] = @meta.to_h unless @meta.empty?
         result["sides"] = @sides.to_h unless @sides.empty?
 
@@ -516,6 +631,7 @@ module Sashite
           @moves == other.moves &&
           @status&.to_s == other.status&.to_s &&
           @draw_offered_by == other.draw_offered_by &&
+          @winner == other.winner &&
           @meta == other.meta &&
           @sides == other.sides
       end
@@ -527,7 +643,7 @@ module Sashite
       # @example
       #   game.hash  # => 123456789
       def hash
-        [@setup.to_s, @moves, @status&.to_s, @draw_offered_by, @meta, @sides].hash
+        [@setup.to_s, @moves, @status&.to_s, @draw_offered_by, @winner, @meta, @sides].hash
       end
 
       # Generate debug representation
@@ -536,12 +652,13 @@ module Sashite
       #
       # @example
       #   game.inspect
-      #   # => "#<Game setup=\"...\" moves=[...] status=\"in_progress\" draw_offered_by=\"first\">"
+      #   # => "#<Game setup=\"...\" moves=[...] status=\"in_progress\" draw_offered_by=\"first\" winner=nil>"
       def inspect
         parts = ["setup=#{@setup.to_s.inspect}"]
         parts << "moves=#{@moves.inspect}"
         parts << "status=#{@status&.to_s.inspect}" if @status
         parts << "draw_offered_by=#{@draw_offered_by.inspect}" if @draw_offered_by
+        parts << "winner=#{@winner.inspect}" if @winner
         parts << "meta=#{@meta.inspect}" unless @meta.empty?
         parts << "sides=#{@sides.inspect}" unless @sides.empty?
 
@@ -601,6 +718,16 @@ module Sashite
         return if VALID_DRAW_OFFERED_BY.include?(value)
 
         raise ::ArgumentError, ERROR_INVALID_DRAW_OFFERED_BY
+      end
+
+      # Validate winner field
+      #
+      # @param value [String, nil] winner value to validate
+      # @raise [ArgumentError] if value is invalid
+      def validate_winner(value)
+        return if VALID_WINNER.include?(value)
+
+        raise ::ArgumentError, ERROR_INVALID_WINNER
       end
     end
   end
